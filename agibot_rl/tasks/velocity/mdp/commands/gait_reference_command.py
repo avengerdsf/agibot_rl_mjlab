@@ -175,10 +175,12 @@ class _ContinuousTimeClf:
     q_weights: tuple[float, ...],
     r_weights: tuple[float, ...],
     device: torch.device,
+    yaw_idx: tuple[int, ...] = (),
   ):
     self.n_outputs = n_outputs
     self.dt = dt
     self.device = device
+    self.yaw_idx = yaw_idx
     if len(q_weights) != 2 * n_outputs:
       raise ValueError(
         f"q_weights length must be {2 * n_outputs}, got {len(q_weights)}."
@@ -218,6 +220,10 @@ class _ContinuousTimeClf:
 
     y_err = y_act - y_ref
     dy_err = dy_act - dy_ref
+    if self.yaw_idx:
+      yaw_idx = torch.as_tensor(self.yaw_idx, device=y_act.device, dtype=torch.long)
+      yaw_err = y_err[:, yaw_idx]
+      y_err[:, yaw_idx] = (yaw_err + torch.pi) % (2.0 * torch.pi) - torch.pi
     eta = torch.zeros(y_act.shape[0], 2 * self.n_outputs, device=y_act.device)
     eta[:, 0::2] = y_err
     eta[:, 1::2] = dy_err
@@ -563,6 +569,7 @@ class HLIPReferenceCommand(CommandTerm):
       q_weights=cfg.q_weights,
       r_weights=cfg.r_weights,
       device=self.device,
+      yaw_idx=cfg.yaw_idx,
     )
     self.metrics["v"] = self.v
     self.metrics["vdot"] = self.vdot
@@ -1007,6 +1014,7 @@ class HLIPReferenceCommandCfg(CommandTermCfg):
   hlip_step_width: float = 0.26
   q_weights: tuple[float, ...] = HLIP_CLF_Q_WEIGHTS
   r_weights: tuple[float, ...] = HLIP_CLF_R_WEIGHTS
+  yaw_idx: tuple[int, ...] = (5, 11)
 
   def build(self, env) -> HLIPReferenceCommand:
     return HLIPReferenceCommand(self, env)
