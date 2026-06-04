@@ -17,7 +17,7 @@ from agibot_rl.tasks.velocity.human_base_env_cfg import POLICY_JOINTS_NAMES, mak
 from agibot_rl.tasks.velocity import mdp
 from agibot_rl.tasks.velocity.mdp.commands.base_command import UniformVelocityCommandCfg as X1VelocityCommandCfg
 from agibot_rl.tasks.velocity.mdp.commands.gait_phase_command import GaitPhaseCommandCfg
-from agibot_rl.tasks.velocity.mdp.commands.gait_reference_command import HLIPReferenceCommandCfg
+from agibot_rl.tasks.velocity.mdp.commands.hlip_reference_command import HLIPReferenceCommandCfg
 from mjlab.managers.observation_manager import ObservationGroupCfg, ObservationTermCfg
 
 

@@ -12,6 +12,7 @@ class GaitPhaseCommand(CommandTerm):
 
   def __init__(self, cfg: "GaitPhaseCommandCfg", env):
     super().__init__(cfg, env)
+    # 初始化
     self.phase = torch.zeros(self.num_envs, device=self.device)
     self.phase_var = torch.zeros_like(self.phase)
     self.cur_swing_time = torch.zeros_like(self.phase)
@@ -37,23 +38,23 @@ class GaitPhaseCommand(CommandTerm):
 
   def _update_command(self) -> None:
     elapsed = self._env.episode_length_buf.to(self.device) * self._env.step_dt
-    self.phase = (elapsed / self.cfg.period) % 1.0
+    self.phase = (elapsed / self.cfg.period) % 1.0 #(0,1)
     first_half = self.phase < 0.5
     self.stance_idx = torch.where(
       first_half,
       torch.zeros_like(self.stance_idx),
       torch.ones_like(self.stance_idx),
     )
-    self.swing_idx = 1 - self.stance_idx
-    self.phase_var = torch.where(first_half, 2.0 * self.phase, 2.0 * self.phase - 1.0)
-    self.cur_swing_time = self.phase_var * (0.5 * self.cfg.period)
+    self.swing_idx = 1 - self.stance_idx #假设机器人左脚为1，右脚为0，也就是为了给支撑脚编号
+    self.phase_var = torch.where(first_half, 2.0 * self.phase, 2.0 * self.phase - 1.0) # 半周期内部相位，范围也是：[0, 1)
+    self.cur_swing_time = self.phase_var * (0.5 * self.cfg.period) # 当前摆动时间 = 当前半周期归一化相位 × 半个步态周期时间
     self._command = torch.stack(
       (
         torch.sin(2.0 * torch.pi * self.phase),
         torch.cos(2.0 * torch.pi * self.phase),
       ),
       dim=1,
-    )
+    )# （4096，2）
 
 
 @dataclass(kw_only=True)
