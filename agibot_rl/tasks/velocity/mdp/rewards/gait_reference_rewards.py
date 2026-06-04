@@ -158,6 +158,23 @@ def clf_reward(
   reward = torch.exp(-torch.clamp(command_term.v, max=5.0 * max_clf) / max_clf)
   env.extras.setdefault("log", {})
   env.extras["log"]["Metrics/hlip_clf_v"] = torch.mean(command_term.v)
+  y_err = command_term.clf.last_y_err
+  dy_err = command_term.clf.last_dy_err
+  if y_err.numel() > 0 and dy_err.numel() > 0:
+    env.extras["log"]["Metrics/hlip_clf/max_abs_y_err"] = torch.max(torch.abs(y_err))
+    env.extras["log"]["Metrics/hlip_clf/max_abs_dy_err"] = torch.max(torch.abs(dy_err))
+    env.extras["log"]["Metrics/hlip_clf/pelvis_yaw_err_abs_mean"] = torch.mean(
+      torch.abs(y_err[:, 5])
+    )
+    env.extras["log"]["Metrics/hlip_clf/swing_foot_yaw_err_abs_mean"] = torch.mean(
+      torch.abs(y_err[:, 11])
+    )
+    env.extras["log"]["Metrics/hlip_clf/pelvis_yaw_rate_err_abs_mean"] = torch.mean(
+      torch.abs(dy_err[:, 5])
+    )
+    env.extras["log"]["Metrics/hlip_clf/swing_foot_yaw_rate_err_abs_mean"] = torch.mean(
+      torch.abs(dy_err[:, 11])
+    )
   return reward
 
 
@@ -179,4 +196,7 @@ def clf_decreasing_condition(
   penalty = torch.clamp(violation / max_violation, min=0.0, max=1.0)
   env.extras.setdefault("log", {})
   env.extras["log"]["Metrics/hlip_clf_decay_violation"] = torch.mean(violation)
+  env.extras["log"]["Metrics/hlip_clf/vdot_plus_alpha_v"] = torch.mean(
+    command_term.vdot + alpha * command_term.v
+  )
   return penalty

@@ -415,14 +415,6 @@ def agibot_x1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       "asset_cfg": SceneEntityCfg("robot", body_names=("x1-body",))
       },
   )
-  cfg.metrics["yaw_tracking_diagnostics"] = MetricsTermCfg(
-    func=mdp.yaw_tracking_diagnostics,
-    params={
-      "command_name": "twist",
-      "action_name": "joint_pos",
-      "vx_threshold": 0.2,
-    },
-  )
   # cfg.metrics["yaw_roll_actuator_force_ratio"] = MetricsTermCfg(
   #   func=mdp.actuator_force_ratio,
   #   params={

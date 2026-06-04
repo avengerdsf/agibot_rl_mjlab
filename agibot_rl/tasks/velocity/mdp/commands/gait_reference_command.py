@@ -201,6 +201,8 @@ class _ContinuousTimeClf:
     self.norm_p = torch.linalg.norm(self.p, ord=2)
     self.norm_P = self.norm_p
     self.v_buffer: torch.Tensor | None = None
+    self.last_y_err = torch.zeros(0, n_outputs, device=device)
+    self.last_dy_err = torch.zeros(0, n_outputs, device=device)
     self.step_count = 0
 
   def reset(self, env_ids: torch.Tensor) -> None:
@@ -224,6 +226,8 @@ class _ContinuousTimeClf:
       yaw_idx = torch.as_tensor(self.yaw_idx, device=y_act.device, dtype=torch.long)
       yaw_err = y_err[:, yaw_idx]
       y_err[:, yaw_idx] = (yaw_err + torch.pi) % (2.0 * torch.pi) - torch.pi
+    self.last_y_err = y_err.detach()
+    self.last_dy_err = dy_err.detach()
     eta = torch.zeros(y_act.shape[0], 2 * self.n_outputs, device=y_act.device)
     eta[:, 0::2] = y_err
     eta[:, 1::2] = dy_err
