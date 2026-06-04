@@ -33,11 +33,24 @@ HLIP_CLF_ERROR_SCALES = (
 HLIP_CLF_Q_WEIGHTS = tuple(1.0 / (scale * scale) for scale in HLIP_CLF_ERROR_SCALES)
 HLIP_CLF_R_WEIGHTS = (1.0,) * 12
 
+
+# Bezier 曲线的位置公式 
 def _bezier_deg(
   tau: torch.Tensor,
   control_points: torch.Tensor,
   degree: int,
 ) -> torch.Tensor:
+  # Bezier 曲线位置公式：
+  #
+  # B_n(tau) = sum_{i=0}^{n} C(n, i) * (1 - tau)^(n - i) * tau^i * P_i
+  #
+  # 其中：
+  # n 表示 Bezier 曲线阶数，也就是 degree
+  # tau 表示归一化时间相位，范围为 [0, 1]
+  # P_i 表示第 i 个控制点
+  # C(n, i) 表示组合数
+  #
+  # 本函数输出的是 Bezier 曲线在 tau 时刻的位置值
   tau = torch.clamp(tau, 0.0, 1.0)
   coefs = torch.tensor(
     [math.comb(degree, idx) for idx in range(degree + 1)],
@@ -45,21 +58,33 @@ def _bezier_deg(
     device=control_points.device,
   )
   idx = torch.arange(degree + 1, device=control_points.device)
-  terms = (
-    control_points
-    * coefs.unsqueeze(0)
-    * ((1.0 - tau).unsqueeze(1) ** (degree - idx).unsqueeze(0))
-    * (tau.unsqueeze(1) ** idx.unsqueeze(0))
-  )
+  terms = control_points * coefs.unsqueeze(0) * ((1.0 - tau).unsqueeze(1) ** (degree - idx).unsqueeze(0)) * (tau.unsqueeze(1) ** idx.unsqueeze(0))
   return torch.sum(terms, dim=1)
 
-
+# Bezier 曲线对真实时间的一阶导数公式
 def _bezier_deriv_deg(
   tau: torch.Tensor,
   duration: torch.Tensor,
   control_points: torch.Tensor,
   degree: int,
 ) -> torch.Tensor:
+  # Bezier 曲线对归一化相位 tau 的导数公式：
+  #
+  # dB_n(tau) / d tau
+  # = n * sum_{i=0}^{n-1} C(n-1, i)
+  #       * (1 - tau)^(n - 1 - i)
+  #       * tau^i
+  #       * (P_{i+1} - P_i)
+  #
+  # 如果真实时间为 t，且 tau = t / T，则：
+  #
+  # d tau / dt = 1 / T
+  #
+  # 因此 Bezier 曲线对真实时间的速度为：
+  #
+  # dB_n(tau) / dt = dB_n(tau) / d tau * 1 / T
+  #
+  # 也就是最后要除以 duration
   tau = torch.clamp(tau, 0.0, 1.0)
   cp_diff = control_points[:, 1:] - control_points[:, :-1]
   coefs = torch.tensor(
@@ -77,23 +102,23 @@ def _bezier_deriv_deg(
   )
   return torch.sum(terms, dim=1) / torch.clamp(duration, min=1e-6)
 
-
 def _euler_rates_to_omega(eul: torch.Tensor, eul_rates: torch.Tensor) -> torch.Tensor:
-  phi, theta, psi = eul.unbind(-1)
+  phi, theta, psi = eul.unbind(-1) # roll pitch yaw
   zeros = torch.zeros_like(theta)
   ones = torch.ones_like(theta)
   matrix = torch.stack(
     (
-      torch.stack((torch.cos(theta) * torch.cos(psi), torch.sin(psi), zeros), dim=-1),
+      torch.stack((torch.cos(theta) * torch.cos(psi), torch.sin(psi), zeros), dim=-1), # (B,3)
       torch.stack((-torch.cos(theta) * torch.sin(psi), torch.cos(psi), zeros), dim=-1),
       torch.stack((torch.sin(theta), zeros, ones), dim=-1),
     ),
     dim=-2,
-  )
+  )# [B,3,3]
   return torch.einsum("bij,bj->bi", matrix, eul_rates)
 
 
 class _ContinuousTimeClf:
+  # 根据输出误差构造一个二次型李雅普诺夫函数，然后再利用差分近似计算李雅普诺夫函数的变化率
   def __init__(
     self,
     n_outputs: int,
@@ -122,8 +147,12 @@ class _ContinuousTimeClf:
     b_full = np.kron(np.eye(n_outputs), b_block)
     p_np = solve_continuous_are(a_full, b_full, q_np, r_np)
 
+    # 李雅普诺夫函数里的二次型权重矩阵。
+    # 把 numpy 里的 p_np 转成 PyTorch 张量
     self.p = torch.as_tensor(p_np, dtype=torch.float32, device=device)
+    # eigvalsh 专门用于实对称矩阵 / Hermitian 矩阵的特征值，结果更稳定，而且输出的是实数从小到大排列.eigenvalues[-1]取最后一个，也就是最大特征值：
     self.lambda_max = torch.linalg.eigvalsh(self.p)[-1]
+    # 求矩阵 P 的 2 范数，也叫谱范数（无穷范数 ord=float("inf"））
     self.norm_p = torch.linalg.norm(self.p, ord=2)
     self.norm_P = self.norm_p
     self.v_buffer: torch.Tensor | None = None
@@ -142,21 +171,27 @@ class _ContinuousTimeClf:
     dy_act: torch.Tensor,
     dy_ref: torch.Tensor,
   ) -> torch.Tensor:
+    # 检测环境数量匹配度创建缓存
     if self.v_buffer is None or self.v_buffer.shape[0] != y_act.shape[0]:
       self.v_buffer = torch.zeros(y_act.shape[0], 3, device=y_act.device)
       self.step_count = 0
 
+    # 输出跟踪误差
     y_err = y_act - y_ref
     dy_err = dy_act - dy_ref
     if self.yaw_idx:
       yaw_idx = torch.as_tensor(self.yaw_idx, device=y_act.device, dtype=torch.long)
       yaw_err = y_err[:, yaw_idx]
+      # 归一化角度误差
       y_err[:, yaw_idx] = (yaw_err + torch.pi) % (2.0 * torch.pi) - torch.pi
+    # 得到的是一个新的 Tensor 对象，但是它通常和原来的 y 共享同一块数据内存，
     self.last_y_err = y_err.detach()
     self.last_dy_err = dy_err.detach()
+    # 构造误差状态
     eta = torch.zeros(y_act.shape[0], 2 * self.n_outputs, device=y_act.device)
     eta[:, 0::2] = y_err
     eta[:, 1::2] = dy_err
+    # 批量计算 CLF 的二次型
     v = torch.einsum("bi,ij,bj->b", eta, self.p, eta)
 
     self.v_buffer[:, 2] = self.v_buffer[:, 1]
@@ -174,14 +209,17 @@ class _ContinuousTimeClf:
   ) -> tuple[torch.Tensor, torch.Tensor]:
     v_curr = self.compute_v(y_act, y_ref, dy_act, dy_ref)
     if self.step_count >= 3:
+      # 二阶后向差分公式
       vdot = (
         3.0 * self.v_buffer[:, 0]
         - 4.0 * self.v_buffer[:, 1]
         + self.v_buffer[:, 2]
       ) / (2.0 * self.dt)
     elif self.step_count == 2:
+      # 一阶后向差分
       vdot = (self.v_buffer[:, 0] - self.v_buffer[:, 1]) / self.dt
     else:
+      # 第一帧没有历史数据，不能算变化率，所以直接给 0
       vdot = torch.zeros_like(v_curr)
     return vdot, v_curr
 
@@ -204,34 +242,46 @@ class _HLIPFootPlacement:
     self.step_width = step_width
     self.lambda_ = math.sqrt(self.gravity / self.com_height)
     single_support = self.step_time - self.double_support_time
+    # 单支撑相位矩阵 单支撑阶段的线性倒立摆动力学：
     A_ss = torch.tensor(
       [[0.0, 1.0], [self.gravity / self.com_height, 0.0]],
       device=self.device,
     )
+    # 双支撑相位矩阵 表示双支撑阶段近似为匀速运动：
     A_ds = torch.tensor([[0.0, 1.0], [0.0, 0.0]], device=self.device)
+    # 是落足点输入对状态的影响
     B = torch.tensor([-1.0, 0.0], device=self.device)
+    # torch.matrix_exp(A_ss * single_support) 连续系统的精确离散化
+    # 从一个支撑相位到下一个支撑相位的整体状态转移
     self.A_s2s = torch.matrix_exp(A_ss * single_support) @ torch.matrix_exp(
       A_ds * self.double_support_time
     )
+    # 是落足点输入经过单支撑传播后的影响
     self.B_s2s = torch.matrix_exp(A_ss * single_support) @ B
 
   def compute_orbit(
     self,
     command_b: torch.Tensor,
   ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-    step_x = command_b[:, 0] * self.step_time
+    step_x = command_b[:, 0] * self.step_time # 计算前向步长 step_x
+    # 构造单位矩阵 eye [4096,2,2]
     eye = torch.eye(2, device=self.device).unsqueeze(0).expand(
       command_b.shape[0], -1, -1
     )
+    # 求 x 方向 HLIP 周期轨道的初始状态：
     x_init = torch.linalg.solve(
       eye - self.A_s2s,
       self.B_s2s.view(1, 2, 1) * step_x.view(-1, 1, 1),
     ).squeeze(-1)
 
+    # 求步宽
     step_y_left = command_b[:, 1] * self.step_time + self.step_width
     step_y_right = command_b[:, 1] * self.step_time - self.step_width
+    # 两步转移矩阵
     A_squared = self.A_s2s @ self.A_s2s
+    # 输入的一步转移矩阵
     B_term = self.A_s2s @ self.B_s2s
+    # 求解轨道的初始状态，也就是经过两步传播回到相同的状态
     y_left = torch.linalg.solve(
       eye - A_squared,
       B_term.view(1, 2, 1) * step_y_left.view(-1, 1, 1)
@@ -254,6 +304,7 @@ class _HLIPFootPlacement:
     x0 = initial_state[:, 0]
     v0 = initial_state[:, 1]
     lam = self.lambda_
+    # 倒立摆模型解析解
     pos = x0 * torch.cosh(lam * current_time) + (v0 / lam) * torch.sinh(
       lam * current_time
     )
@@ -295,6 +346,10 @@ class HLIPReferenceCommand(CommandTerm):
     self.stance_foot_pos_0 = foot_pos_w[:, 0, :].clone()
     self.stance_foot_ori_quat_0 = foot_quat_w[:, 0, :].clone()
     self.stance_foot_ori_0 = self._quat_to_rpy(self.stance_foot_ori_quat_0)
+    self.stance_foot_pos = self.stance_foot_pos_0.clone()
+    self.stance_foot_ori = self.stance_foot_ori_0.clone()
+    self.stance_foot_vel = torch.zeros(self.num_envs, 3, device=self.device)
+    self.stance_foot_ang_vel = torch.zeros_like(self.stance_foot_vel)
     self.hlip = _HLIPFootPlacement(
       device=self.device,
       gravity=cfg.hlip_gravity,
@@ -305,6 +360,11 @@ class HLIPReferenceCommand(CommandTerm):
     )
     self.ref_joint_pos = torch.zeros(self.num_envs, 0, device=self.device)
     self.ref_joint_ids_tensor = torch.empty(0, device=self.device, dtype=torch.long)
+    # self.n_outputs
+    # COM xyz                 0,1,2
+    # pelvis rpy              3,4,5
+    # swing foot xyz          6,7,8
+    # swing foot rpy          9,10,11
     self.n_outputs = 6 + 3 * len(self.foot_site_names)
     self.y_out = torch.zeros(self.num_envs, self.n_outputs, device=self.device)
     self.y_act = torch.zeros_like(self.y_out)
@@ -451,6 +511,17 @@ class HLIPReferenceCommand(CommandTerm):
     )
     self.prev_stance_idx = self.stance_idx.clone()
 
+  def _update_stance_state(self) -> None:
+    env_ids = torch.arange(self.num_envs, device=self.device)
+    foot_pos_w = self._current_foot_pos_w()
+    foot_rpy = self._current_foot_rpy()
+    foot_vel_w = self.robot.data.site_lin_vel_w[:, self.foot_site_ids_tensor, :]
+    foot_ang_vel_w = self.robot.data.site_ang_vel_w[:, self.foot_site_ids_tensor, :]
+    self.stance_foot_pos = foot_pos_w[env_ids, self.stance_idx, :]
+    self.stance_foot_ori = foot_rpy[env_ids, self.stance_idx, :]
+    self.stance_foot_vel = foot_vel_w[env_ids, self.stance_idx, :]
+    self.stance_foot_ang_vel = foot_ang_vel_w[env_ids, self.stance_idx, :]
+
   def _pelvis_reference(
     self,
     command: torch.Tensor,
@@ -464,7 +535,7 @@ class HLIPReferenceCommand(CommandTerm):
       0.2,
     )
     pitch_ref = 0.02 * torch.sin(2.0 * torch.pi * tp)
-    yaw_ref = self.stance_foot_ori_0[:, 2] + command[:, 2] * self.cur_swing_time
+    yaw_ref = command[:, 2] * self.cur_swing_time
     pelvis_rpy_ref = torch.stack((roll_ref, pitch_ref, wrap_to_pi(yaw_ref)), dim=1)
 
     dphase_dt = 1.0 / torch.clamp(
@@ -577,6 +648,7 @@ class HLIPReferenceCommand(CommandTerm):
     self.stance_idx = phase_command.stance_idx
     self.swing_idx = phase_command.swing_idx
     self._update_stance_initial_pose()
+    self._update_stance_state()
     foot_pos_l = self._current_foot_pos_l()
     moving = torch.linalg.norm(command, dim=1) > self.cfg.reference_command_threshold
     left_swing = (self.swing_idx == 0) & moving

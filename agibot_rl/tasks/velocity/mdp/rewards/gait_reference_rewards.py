@@ -200,3 +200,48 @@ def clf_decreasing_condition(
     command_term.vdot + alpha * command_term.v
   )
   return penalty
+
+
+def holonomic_constraint(
+  env,
+  command_name: str,
+  sigma_pose: float,
+) -> torch.Tensor:
+  command_term = env.command_manager.get_term(command_name)
+  delta_xy = command_term.stance_foot_pos[:, :2] - command_term.stance_foot_pos_0[:, :2]
+  delta_z = (
+    command_term.stance_foot_pos[:, 2] - command_term.stance_foot_pos_0[:, 2]
+  ).unsqueeze(1)
+  roll = command_term.stance_foot_ori[:, 0].unsqueeze(1)
+  delta_yaw = (
+    (
+      command_term.stance_foot_ori[:, 2]
+      - command_term.stance_foot_ori_0[:, 2]
+      + torch.pi
+    )
+    % (2.0 * torch.pi)
+    - torch.pi
+  ).unsqueeze(1)
+  pose_error = torch.cat((delta_xy, delta_z, roll, delta_yaw), dim=1)
+  error_norm = torch.sum(torch.square(pose_error), dim=1)
+  env.extras.setdefault("log", {})
+  env.extras["log"]["Metrics/hlip_holonomic/pose_error"] = torch.mean(
+    torch.sqrt(error_norm)
+  )
+  return torch.exp(-error_norm / sigma_pose**2)
+
+
+def holonomic_constraint_vel(
+  env,
+  command_name: str,
+  sigma_vel: float,
+) -> torch.Tensor:
+  command_term = env.command_manager.get_term(command_name)
+  yaw_rate = command_term.stance_foot_ang_vel[:, 2].unsqueeze(1)
+  vel_error = torch.cat((command_term.stance_foot_vel, yaw_rate), dim=1)
+  error_norm = torch.sum(torch.square(vel_error), dim=1)
+  env.extras.setdefault("log", {})
+  env.extras["log"]["Metrics/hlip_holonomic/vel_error"] = torch.mean(
+    torch.sqrt(error_norm)
+  )
+  return torch.exp(-error_norm / sigma_vel**2)

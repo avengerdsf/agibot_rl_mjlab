@@ -343,7 +343,7 @@ def agibot_x1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   )
   cfg.rewards["hlip_clf_reward"] = RewardTermCfg(
     func=mdp.clf_reward,
-    weight=1.0,
+    weight=3.0,
     params={
       "command_name": "hlip_ref",
       "max_eta_err": 0.5,
@@ -351,12 +351,28 @@ def agibot_x1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   )
   cfg.rewards["hlip_clf_decreasing_condition"] = RewardTermCfg(
     func=mdp.clf_decreasing_condition,
-    weight=-0.2,
+    weight=-0.6,
     params={
       "command_name": "hlip_ref",
       "alpha": 0.5,
       "eta_max": 0.5,
       "eta_dot_max": 1.0,
+    },
+  )
+  cfg.rewards["hlip_holonomic_constraint"] = RewardTermCfg(
+    func=mdp.holonomic_constraint,
+    weight=2.0,
+    params={
+      "command_name": "hlip_ref",
+      "sigma_pose": math.sqrt(5.0 * 0.01),
+    },
+  )
+  cfg.rewards["hlip_holonomic_constraint_vel"] = RewardTermCfg(
+    func=mdp.holonomic_constraint_vel,
+    weight=1.0,
+    params={
+      "command_name": "hlip_ref",
+      "sigma_vel": math.sqrt(0.1),
     },
   )
   cfg.rewards["foot_slip"].func = mdp.feet_geom_slip
@@ -400,7 +416,7 @@ def agibot_x1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
 
   cfg.rewards["body_height_l2"] = RewardTermCfg(
     func=mdp.body_height_l2,
-    weight=-1.0,
+    weight=-0.2,
     params={
       "target_height": 0.61,
       "std": 0.08,
@@ -550,14 +566,17 @@ def agibot_x1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
           "left_hip_yaw_.*",
           "right_hip_yaw_.*",
           ".*_ankle_roll_.*",
+          "left_shoulder_roll_.*",
+          "right_shoulder_roll_.*",
         ),
       ),
       "yaw_roll_joint_names": (
         ("lumbar_yaw_.*",),
         ("left_hip_roll_.*", "left_hip_yaw_.*", "left_ankle_roll_.*"),
         ("right_hip_roll_.*", "right_hip_yaw_.*", "right_ankle_roll_.*"),
+        ("left_shoulder_roll_.*", "right_shoulder_roll_.*"),
       ),
-      "yaw_roll_std": 0.5,
+      "yaw_roll_std": 0.15,
       "joint_diff_scale": 0.01,
     },
   )
