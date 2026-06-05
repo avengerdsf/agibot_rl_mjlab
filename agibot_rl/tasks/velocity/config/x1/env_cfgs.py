@@ -402,18 +402,7 @@ def agibot_x1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       "num_feet": 2,
     },
   )
-  cfg.rewards["feet_contact_number"] = RewardTermCfg(
-    func=mdp.feet_contact_number,
-    weight=0.8,
-    params={
-      "sensor_name": feet_ground_cfg.name,
-      "period": 0.7,
-      "offset": [0.0, 0.5],
-      "threshold": 0.56,
-      "command_name": "twist",
-      "command_threshold": 0.1,
-    },
-  )
+  cfg.rewards["feet_contact_number"] = None
   cfg.rewards["gait_reference_joint_pos"] = None
 
   cfg.rewards["body_height_l2"] = RewardTermCfg(
