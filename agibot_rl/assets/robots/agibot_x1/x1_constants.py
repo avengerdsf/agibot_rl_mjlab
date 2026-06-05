@@ -50,11 +50,20 @@ def get_spec() -> mujoco.MjSpec:
 X1_ACTUATOR_WAIST = BuiltinPositionActuatorCfg(
     target_names_expr=(
         "lumbar_yaw_joint",
-        # "lumbar_pitch_joint",
-        # "lumbar_roll_joint",
     ),
     stiffness=150.0,
     damping = 4.0,
+    effort_limit=50.0,
+    armature=0.01,
+)
+
+X1_ACTUATOR_FIXED_WAIST = BuiltinPositionActuatorCfg(
+    target_names_expr=(
+        "lumbar_roll_joint",
+        "lumbar_pitch_joint",
+    ),
+    stiffness=700.0,
+    damping=0.6,
     effort_limit=50.0,
     armature=0.01,
 )
@@ -63,11 +72,23 @@ X1_ACTUATOR_SHOULDER_PITCH = BuiltinPositionActuatorCfg(
     target_names_expr=(
         ".*_shoulder_pitch_joint",
         ".*_shoulder_roll_joint",
-        # ".*_shoulder_yaw_joint",
         ".*_elbow_pitch_joint",
     ),
     stiffness=40.0,
     damping=2.0,
+    effort_limit=35.0,
+    armature=0.01,
+)
+
+X1_ACTUATOR_FIXED_ARM = BuiltinPositionActuatorCfg(
+    target_names_expr=(
+        ".*_shoulder_yaw_joint",
+        ".*_elbow_yaw_joint",
+        ".*_wrist_pitch_joint",
+        ".*_wrist_roll_joint",
+    ),
+    stiffness=30.0,
+    damping=0.1,
     effort_limit=35.0,
     armature=0.01,
 )
@@ -137,13 +158,17 @@ HOME_KEYFRAME = EntityCfg.InitialStateCfg(
   pos=(0.0, 0.0, 0.621),
   joint_pos={
     "lumbar_yaw_.*": 0.0,
-    # "lumbar_pitch_.*": 0.0,
-    # "lumbar_roll_.*": 0.0,
+    "lumbar_pitch_.*": 0.0,
+    "lumbar_roll_.*": 0.0,
     "left_shoulder_pitch_.*": 0.15,
     "right_shoulder_pitch_.*": 0.15,
     "left_shoulder_roll_.*": -0.18,
     "right_shoulder_roll_.*": -0.18,
+    ".*_shoulder_yaw_.*": 0.0,
     ".*_elbow_pitch_.*": 0.3,
+    ".*_elbow_yaw_.*": 0.0,
+    ".*_wrist_pitch_.*": 0.0,
+    ".*_wrist_roll_.*": 0.0,
     "left_hip_pitch_.*": 0.4,
     "right_hip_pitch_.*": -0.4,
     "left_hip_roll_.*": 0.05,
@@ -176,7 +201,9 @@ FULL_COLLISION = CollisionCfg(
 X1_ARTICULATION = EntityArticulationInfoCfg(
   actuators=(
     X1_ACTUATOR_WAIST,
+    X1_ACTUATOR_FIXED_WAIST,
     X1_ACTUATOR_SHOULDER_PITCH,
+    X1_ACTUATOR_FIXED_ARM,
     X1_ACTUATOR_HIP_PITCH,
     X1_ACTUATOR_HIP_ROLL,
     X1_ACTUATOR_HIP_YAW,

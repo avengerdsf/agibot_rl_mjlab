@@ -614,6 +614,15 @@ class HLIPReferenceCommand(CommandTerm):
       (x_ref_dot, y_ref_dot, torch.zeros_like(x_ref_dot)),
       dim=1,
     )
+    delta_yaw = command[:, 2] * cur_step_time
+    cos_yaw = torch.cos(delta_yaw)
+    sin_yaw = torch.sin(delta_yaw)
+    root_ref_xy = root_ref[:, :2].clone()
+    root_ref_vel_xy = root_ref_vel[:, :2].clone()
+    root_ref[:, 0] = cos_yaw * root_ref_xy[:, 0] - sin_yaw * root_ref_xy[:, 1]
+    root_ref[:, 1] = sin_yaw * root_ref_xy[:, 0] + cos_yaw * root_ref_xy[:, 1]
+    root_ref_vel[:, 0] = cos_yaw * root_ref_vel_xy[:, 0] - sin_yaw * root_ref_vel_xy[:, 1]
+    root_ref_vel[:, 1] = sin_yaw * root_ref_vel_xy[:, 0] + cos_yaw * root_ref_vel_xy[:, 1]
 
     self.y_out = torch.cat(
       (root_ref, pelvis_rpy_ref, ref_foot_pos_l, ref_swing_foot_rpy),
@@ -678,6 +687,16 @@ class HLIPReferenceCommand(CommandTerm):
     )
     step_y = torch.where(left_swing, step_y_by_foot[:, 0], step_y_by_foot[:, 1])
     target_delta_xy = torch.stack((step_x, step_y), dim=1)
+    delta_yaw = command[:, 2] * self.cur_swing_time
+    cos_yaw = torch.cos(delta_yaw)
+    sin_yaw = torch.sin(delta_yaw)
+    target_delta_xy = torch.stack(
+      (
+        cos_yaw * target_delta_xy[:, 0] - sin_yaw * target_delta_xy[:, 1],
+        sin_yaw * target_delta_xy[:, 0] + cos_yaw * target_delta_xy[:, 1],
+      ),
+      dim=1,
+    )
     target_delta_xy[:, 0] = torch.clamp(
       target_delta_xy[:, 0],
       min=self.cfg.swing_step_x_min,
