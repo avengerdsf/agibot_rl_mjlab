@@ -229,18 +229,20 @@ def agibot_x1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   cfg.observations["actor"].terms.pop("height_scan", None)
   cfg.observations["critic"].terms.pop("height_scan", None)
 
-  foot_site_cfg = SceneEntityCfg(
-    "robot",
-    site_names=X1_FOOT_SITES,
-    preserve_order=True,
-  )
+  def foot_site_cfg() -> SceneEntityCfg:
+    return SceneEntityCfg(
+      "robot",
+      site_names=X1_FOOT_SITES,
+      preserve_order=True,
+    )
+
   foot_geom_cfg = SceneEntityCfg(
     "robot",
     geom_names=X1_FOOT_COLLISION_GEOMS,
     preserve_order=True,
   )
 
-  cfg.observations["critic"].terms["foot_height"].params["asset_cfg"] = foot_site_cfg
+  cfg.observations["critic"].terms["foot_height"].params["asset_cfg"] = foot_site_cfg()
   cfg.observations["critic"].terms.pop("gait_reference_joint_pos_error", None)
   cfg.observations["critic"].terms["hlip_ref_traj"] = ObservationTermCfg(
     func=mdp.hlip_ref_traj,
@@ -287,8 +289,8 @@ def agibot_x1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   cfg.observations["critic"].enable_corruption = False
 
 
-  cfg.rewards["track_linear_velocity"].weight = 2.0
-  cfg.rewards["track_angular_velocity"].weight = 2.0
+  cfg.rewards["track_linear_velocity"].weight = 1.0
+  cfg.rewards["track_angular_velocity"].weight = 1.0
   cfg.rewards["track_linear_velocity"].params["std"] = math.sqrt(0.1)
   cfg.rewards["track_angular_velocity"].params["std"] = math.sqrt(0.1)
   cfg.rewards["track_linear_velocity"].params["std"] = math.sqrt(0.16)
@@ -317,7 +319,7 @@ def agibot_x1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     weight=-0.2,
     params={"command_name": "twist", "command_threshold": 0.05},
   )
-  cfg.rewards["foot_clearance"].params["asset_cfg"] = foot_site_cfg
+  cfg.rewards["foot_clearance"].params["asset_cfg"] = foot_site_cfg()
   cfg.rewards["foot_clearance"].weight = -1.0
   # cfg.rewards["feet_swing_height"] = RewardTermCfg(
   #   func=mdp.feet_swing_height,
@@ -327,7 +329,7 @@ def agibot_x1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   #     "target_height": 0.10,
   #     "command_name": "twist",
   #     "command_threshold": 0.1,
-  #     "asset_cfg": foot_site_cfg,
+  #     "asset_cfg": foot_site_cfg(),
   #   },
   # )
   cfg.rewards["feet_swing_height"] = None
@@ -338,7 +340,7 @@ def agibot_x1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       "command_name": "hlip_ref",
       "std": 0.08,
       "command_threshold": 0.1,
-      "asset_cfg": foot_site_cfg,
+      "asset_cfg": foot_site_cfg(),
     },
   )
   cfg.rewards["hlip_clf_reward"] = RewardTermCfg(
@@ -593,6 +595,11 @@ def agibot_x1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
           "left_hip_yaw_.*",
           "right_hip_yaw_.*",
           ".*_ankle_roll_.*",
+          "left_shoulder_pitch_.*",
+          "right_shoulder_pitch_.*",
+          "left_shoulder_roll_.*",
+          "right_shoulder_roll_.*",
+          ".*_elbow_pitch_.*",
         ),
       ),
       "log_prefix": "Metrics/x1_joint_vel_l2",

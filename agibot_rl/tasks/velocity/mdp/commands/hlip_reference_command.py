@@ -582,7 +582,7 @@ class HLIPReferenceCommand(CommandTerm):
     swing_foot_rpy = foot_rpy[
       torch.arange(self.num_envs, device=self.device),
       swing_indices,
-    ]
+    ].clone()
     swing_foot_ang_vel = foot_ang_vel[
       torch.arange(self.num_envs, device=self.device),
       swing_indices,
@@ -595,7 +595,10 @@ class HLIPReferenceCommand(CommandTerm):
       self.stance_foot_ori_quat_0,
       self.robot.data.root_com_vel_w[:, 0:3],
     )
+    stance_yaw_0 = self.stance_foot_ori_0[:, 2]
+    swing_foot_rpy[:, 2] = wrap_to_pi(swing_foot_rpy[:, 2] - stance_yaw_0)
     pelvis_rpy = self._current_pelvis_rpy()
+    pelvis_rpy[:, 2] = wrap_to_pi(pelvis_rpy[:, 2] - stance_yaw_0)
     pelvis_rpy_ref, pelvis_rpy_rate_ref = self._pelvis_reference(command)
 
     cur_step_time = self.cur_swing_time

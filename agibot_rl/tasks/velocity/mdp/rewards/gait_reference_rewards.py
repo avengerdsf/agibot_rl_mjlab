@@ -158,8 +158,16 @@ def clf_reward(
   reward = torch.exp(-torch.clamp(command_term.v, max=5.0 * max_clf) / max_clf)
   env.extras.setdefault("log", {})
   env.extras["log"]["Metrics/hlip_clf_v"] = torch.mean(command_term.v)
-  y_err = command_term.clf.last_y_err
-  dy_err = command_term.clf.last_dy_err
+  y_err = getattr(
+    command_term.clf,
+    "last_y_err",
+    torch.zeros(0, device=command_term.v.device),
+  )
+  dy_err = getattr(
+    command_term.clf,
+    "last_dy_err",
+    torch.zeros(0, device=command_term.v.device),
+  )
   if y_err.numel() > 0 and dy_err.numel() > 0:
     env.extras["log"]["Metrics/hlip_clf/max_abs_y_err"] = torch.max(torch.abs(y_err))
     env.extras["log"]["Metrics/hlip_clf/max_abs_dy_err"] = torch.max(torch.abs(dy_err))
@@ -212,17 +220,10 @@ def holonomic_constraint(
   delta_z = (
     command_term.stance_foot_pos[:, 2] - command_term.stance_foot_pos_0[:, 2]
   ).unsqueeze(1)
-  roll = command_term.stance_foot_ori[:, 0].unsqueeze(1)
-  delta_yaw = (
-    (
-      command_term.stance_foot_ori[:, 2]
-      - command_term.stance_foot_ori_0[:, 2]
-      + torch.pi
-    )
-    % (2.0 * torch.pi)
-    - torch.pi
-  ).unsqueeze(1)
-  pose_error = torch.cat((delta_xy, delta_z, roll, delta_yaw), dim=1)
+  delta_ori = (
+    command_term.stance_foot_ori - command_term.stance_foot_ori_0 + torch.pi
+  ) % (2.0 * torch.pi) - torch.pi
+  pose_error = torch.cat((delta_xy, delta_z, delta_ori), dim=1)
   error_norm = torch.sum(torch.square(pose_error), dim=1)
   env.extras.setdefault("log", {})
   env.extras["log"]["Metrics/hlip_holonomic/pose_error"] = torch.mean(
