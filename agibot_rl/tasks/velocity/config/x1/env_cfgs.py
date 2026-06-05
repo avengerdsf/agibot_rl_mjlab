@@ -605,6 +605,30 @@ def agibot_x1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       "log_prefix": "Metrics/x1_joint_vel_l2",
     },
   )
+  fixed_joint_names = (
+    "lumbar_roll_.*",
+    "lumbar_pitch_.*",
+    ".*_shoulder_yaw_.*",
+    ".*_elbow_yaw_.*",
+    ".*_wrist_pitch_.*",
+    ".*_wrist_roll_.*",
+  )
+  cfg.rewards["x1_fixed_joint_pos_l2"] = RewardTermCfg(
+    func=mdp.stand_still,
+    weight=-0.5,
+    params={
+      "command_name": None,
+      "asset_cfg": SceneEntityCfg("robot", joint_names=fixed_joint_names),
+    },
+  )
+  cfg.rewards["x1_fixed_joint_vel_l2"] = RewardTermCfg(
+    func=mdp.x1_joint_vel_l2,
+    weight=-0.02,
+    params={
+      "asset_cfg": SceneEntityCfg("robot", joint_names=fixed_joint_names),
+      "log_prefix": "Metrics/x1_fixed_joint_vel_l2",
+    },
+  )
 
   cfg.rewards["body_orientation_l2"].params["asset_cfg"] = SceneEntityCfg(
     "robot", body_names=("x1-body",)
