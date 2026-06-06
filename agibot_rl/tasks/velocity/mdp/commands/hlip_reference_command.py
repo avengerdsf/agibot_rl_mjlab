@@ -801,7 +801,6 @@ class HLIPReferenceCommand(CommandTerm):
       swing_indices,
     ]
     swing_active = swing_mask.any(dim=1).float()
-    active_count = torch.clamp(torch.sum(swing_active), min=1.0)
     swing_foot_pos_l = foot_pos_l[
       torch.arange(self.num_envs, device=self.device),
       swing_indices,
@@ -816,27 +815,9 @@ class HLIPReferenceCommand(CommandTerm):
     self.metrics["step_actual_y"] = swing_foot_pos_l[:, 1]
     self.metrics["step_error_x"] = step_error_xy[:, 0]
     self.metrics["step_error_y"] = step_error_xy[:, 1]
-    self.metrics["step_x_clip_fraction"] = (
-      torch.sum(x_clipped * swing_active) / active_count
-    )
-    self.metrics["step_ref_x_mean"] = (
-      torch.sum(target_delta_xy[:, 0] * swing_active) / active_count
-    )
-    self.metrics["step_ref_y_mean"] = (
-      torch.sum(target_delta_xy[:, 1] * swing_active) / active_count
-    )
-    self.metrics["step_actual_x_mean"] = (
-      torch.sum(swing_foot_pos_l[:, 0] * swing_active) / active_count
-    )
-    self.metrics["step_actual_y_mean"] = (
-      torch.sum(swing_foot_pos_l[:, 1] * swing_active) / active_count
-    )
-    self.metrics["step_error_x_abs_mean"] = (
-      torch.sum(torch.abs(step_error_xy[:, 0]) * swing_active) / active_count
-    )
-    self.metrics["step_error_y_abs_mean"] = (
-      torch.sum(torch.abs(step_error_xy[:, 1]) * swing_active) / active_count
-    )
+    self.metrics["step_error_x_abs"] = torch.abs(step_error_xy[:, 0]) * swing_active
+    self.metrics["step_error_y_abs"] = torch.abs(step_error_xy[:, 1]) * swing_active
+    self.metrics["step_x_clipped"] = x_clipped * swing_active
     pelvis_rpy_ref, pelvis_rpy_rate_ref = self._pelvis_reference(command)
     ref_swing_foot_rpy = torch.zeros_like(pelvis_rpy_ref)
     ref_swing_foot_rpy[:, 2] = pelvis_rpy_ref[:, 2]
