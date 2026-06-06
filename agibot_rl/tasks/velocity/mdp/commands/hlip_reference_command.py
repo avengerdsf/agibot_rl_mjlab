@@ -336,6 +336,7 @@ class HLIPReferenceCommand(CommandTerm):
     self.hlip_x_init = torch.zeros(self.num_envs, 2, device=self.device)
     self.hlip_y_init = torch.zeros(self.num_envs, 2, 2, device=self.device)
     self.prev_swing_foot_mask = torch.zeros_like(self.swing_foot_mask)
+    self.prev_foot_contact = self._current_foot_contact()
     self.swing_start_foot_pos_b = self._current_foot_pos_b()
     self.swing_start_foot_pos_l = self._current_foot_pos_b()
     self.step_target_delta_xy = torch.zeros(
@@ -402,6 +403,7 @@ class HLIPReferenceCommand(CommandTerm):
 
   def _resample_command(self, env_ids: torch.Tensor) -> None:
     self.prev_swing_foot_mask[env_ids] = False
+    self.prev_foot_contact[env_ids] = self._current_foot_contact()[env_ids]
     self.swing_start_foot_pos_b[env_ids] = self._current_foot_pos_b()[env_ids]
     self.swing_start_foot_pos_l[env_ids] = self._current_foot_pos_l()[env_ids]
     self.step_target_delta_xy[env_ids] = 0.0
@@ -446,6 +448,21 @@ class HLIPReferenceCommand(CommandTerm):
     return self._quat_to_rpy(foot_quat_w.reshape(-1, 4)).reshape(
       self.num_envs, len(self.foot_site_names), 3
     )
+
+  def _current_foot_contact(self) -> torch.Tensor:
+    sensor = self._env.scene[self.cfg.contact_sensor_name]
+    assert sensor.data.found is not None
+    contact = sensor.data.found > 0
+    num_feet = len(self.foot_site_names)
+    if contact.shape[1] == num_feet:
+      return contact
+    if contact.shape[1] % num_feet != 0:
+      raise RuntimeError(
+        f"HLIP landing metric expected contact count divisible by num_feet={num_feet}, "
+        f"got {contact.shape[1]}."
+      )
+    geoms_per_foot = contact.shape[1] // num_feet
+    return contact.reshape(contact.shape[0], num_feet, geoms_per_foot).any(dim=-1)
 
   def _current_foot_pos_b(self) -> torch.Tensor:
     foot_pos_w = self._current_foot_pos_w()
@@ -675,10 +692,12 @@ class HLIPReferenceCommand(CommandTerm):
     left_swing = (self.swing_idx == 0) & moving
     right_swing = (self.swing_idx == 1) & moving
     swing_mask = torch.stack((left_swing, right_swing), dim=1)
-    swing_end = self.prev_swing_foot_mask & ~swing_mask
-    landed = swing_end.any(dim=1)
+    foot_contact = self._current_foot_contact()
+    first_contact = foot_contact & ~self.prev_foot_contact
+    landing_mask = self.prev_swing_foot_mask & first_contact
+    landed = landing_mask.any(dim=1)
     if torch.any(landed):
-      landed_foot_idx = torch.argmax(swing_end.to(torch.long), dim=1)
+      landed_foot_idx = torch.argmax(landing_mask.to(torch.long), dim=1)
       env_ids = torch.arange(self.num_envs, device=self.device)
       landing_actual_xy = foot_pos_l[env_ids, landed_foot_idx, :2]
       landing_target_xy = self.step_target_delta_xy[env_ids, landed_foot_idx, :]
@@ -891,6 +910,7 @@ class HLIPReferenceCommand(CommandTerm):
     self.swing_foot_phase = swing_phase
     self.swing_foot_mask = swing_mask
     self.prev_swing_foot_mask = swing_mask
+    self.prev_foot_contact = foot_contact
 
 
 @dataclass(kw_only=True)
@@ -898,6 +918,7 @@ class HLIPReferenceCommandCfg(CommandTermCfg):
   entity_name: str
   velocity_command_name: str = "twist"
   phase_command_name: str = "gait_phase"
+  contact_sensor_name: str = "feet_ground_contact"
   reference_period: float = 0.7
   reference_command_threshold: float = 0.1
   foot_site_names: tuple[str, ...]

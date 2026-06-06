@@ -220,11 +220,17 @@ def holonomic_constraint(
   delta_z = (
     command_term.stance_foot_pos[:, 2] - command_term.stance_foot_pos_0[:, 2]
   ).unsqueeze(1)
-  roll = command_term.stance_foot_ori[:, 0].unsqueeze(1)
+  delta_roll = (
+    command_term.stance_foot_ori[:, 0]
+    - command_term.stance_foot_ori_0[:, 0]
+    + torch.pi
+  ) % (2.0 * torch.pi) - torch.pi
   delta_yaw = (
     command_term.stance_foot_ori[:, 2] - command_term.stance_foot_ori_0[:, 2] + torch.pi
   ) % (2.0 * torch.pi) - torch.pi
-  pose_error = torch.cat((delta_xy, delta_z, roll, delta_yaw.unsqueeze(1)), dim=1)
+  pose_error = torch.cat(
+    (delta_xy, delta_z, delta_roll.unsqueeze(1), delta_yaw.unsqueeze(1)), dim=1
+  )
   error_norm = torch.sum(torch.square(pose_error), dim=1)
   env.extras.setdefault("log", {})
   env.extras["log"]["Metrics/hlip_holonomic/pose_error"] = torch.mean(
