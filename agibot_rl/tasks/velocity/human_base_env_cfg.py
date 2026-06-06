@@ -353,7 +353,7 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
     ),
     "angular_momentum": RewardTermCfg(
       func=mdp.angular_momentum_proxy_penalty,   # Sensor-free equivalent of subtreeangmom.
-      weight=-1e-4,
+      weight=-2e-3,
       params={
         "asset_cfg": SceneEntityCfg(
           "robot",
