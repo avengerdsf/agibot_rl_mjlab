@@ -336,7 +336,7 @@ class HLIPReferenceCommand(CommandTerm):
     self.hlip_x_init = torch.zeros(self.num_envs, 2, device=self.device)
     self.hlip_y_init = torch.zeros(self.num_envs, 2, 2, device=self.device)
     self.prev_swing_foot_mask = torch.zeros_like(self.swing_foot_mask)
-    self.prev_foot_contact = self._current_foot_contact()
+    self.prev_foot_contact = torch.zeros_like(self.swing_foot_mask)
     self.swing_start_foot_pos_b = self._current_foot_pos_b()
     self.swing_start_foot_pos_l = self._current_foot_pos_b()
     self.step_target_delta_xy = torch.zeros(
@@ -868,23 +868,23 @@ class HLIPReferenceCommand(CommandTerm):
     ).float()
     self.metrics["step_ref_x"] = target_delta_xy[:, 0]
     self.metrics["step_ref_y"] = target_delta_xy[:, 1]
-    self.metrics["landing_actual_x"] = self.last_landing_actual_xy[:, 0]
-    self.metrics["landing_actual_y"] = self.last_landing_actual_xy[:, 1]
-    self.metrics["landing_target_x"] = self.last_landing_target_xy[:, 0]
-    self.metrics["landing_target_y"] = self.last_landing_target_xy[:, 1]
-    self.metrics["landing_error_x"] = self.last_landing_error_xy[:, 0]
-    self.metrics["landing_error_y"] = self.last_landing_error_xy[:, 1]
+    self.metrics["landing_actual_x"] = self.last_landing_actual_xy[:, 0].clone()
+    self.metrics["landing_actual_y"] = self.last_landing_actual_xy[:, 1].clone()
+    self.metrics["landing_target_x"] = self.last_landing_target_xy[:, 0].clone()
+    self.metrics["landing_target_y"] = self.last_landing_target_xy[:, 1].clone()
+    self.metrics["landing_error_x"] = self.last_landing_error_xy[:, 0].clone()
+    self.metrics["landing_error_y"] = self.last_landing_error_xy[:, 1].clone()
     self.metrics["landing_error_x_abs"] = (
       torch.abs(self.last_landing_error_xy[:, 0]) * self.last_landing_valid
     )
     self.metrics["landing_error_y_abs"] = (
       torch.abs(self.last_landing_error_xy[:, 1]) * self.last_landing_valid
     )
-    self.metrics["landing_valid"] = self.last_landing_valid
-    self.metrics["step_actual_x"] = self.last_landing_actual_xy[:, 0]
-    self.metrics["step_actual_y"] = self.last_landing_actual_xy[:, 1]
-    self.metrics["step_error_x"] = self.last_landing_error_xy[:, 0]
-    self.metrics["step_error_y"] = self.last_landing_error_xy[:, 1]
+    self.metrics["landing_valid"] = self.last_landing_valid.clone()
+    self.metrics["step_actual_x"] = self.last_landing_actual_xy[:, 0].clone()
+    self.metrics["step_actual_y"] = self.last_landing_actual_xy[:, 1].clone()
+    self.metrics["step_error_x"] = self.last_landing_error_xy[:, 0].clone()
+    self.metrics["step_error_y"] = self.last_landing_error_xy[:, 1].clone()
     self.metrics["step_error_x_abs"] = (
       torch.abs(self.last_landing_error_xy[:, 0]) * self.last_landing_valid
     )
