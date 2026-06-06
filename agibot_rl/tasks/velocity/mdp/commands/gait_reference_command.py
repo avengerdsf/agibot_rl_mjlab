@@ -215,8 +215,8 @@ class GaitReferenceVelocityCommandCfg(UniformVelocityCommandCfg):
   arm_swing_joint_offsets: dict[str, float] = field(default_factory=dict)
   foot_site_names: tuple[str, ...] = ()
   swing_clearance: float = 0.12
-  swing_step_x_min: float = -0.20
-  swing_step_x_max: float = 0.35
+  swing_step_x_min: float = -0.25
+  swing_step_x_max: float = 0.50
   hlip_gravity: float = 9.81
   hlip_com_height: float = 0.61
   hlip_double_support_time: float = 0.1

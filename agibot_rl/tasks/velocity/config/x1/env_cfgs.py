@@ -296,11 +296,10 @@ def agibot_x1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   cfg.rewards["track_linear_velocity"].params["std"] = math.sqrt(0.16)
   cfg.rewards["track_vel_hard"].params["sigma_v"] = 0.30
   cfg.rewards["base_acc"] = RewardTermCfg(
-    func=mdp.base_acc,
-    weight=0.2,
+    func=mdp.base_acc_l2,
+    weight=-0.02,
     params={
       "asset_cfg": SceneEntityCfg("robot"),
-      "scale": 3.0,
       "log_prefix": "Metrics/base_acc",
     },
   )

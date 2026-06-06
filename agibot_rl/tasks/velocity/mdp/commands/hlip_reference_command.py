@@ -697,6 +697,7 @@ class HLIPReferenceCommand(CommandTerm):
       ),
       dim=1,
     )
+    target_delta_xy_raw = target_delta_xy.clone()
     target_delta_xy[:, 0] = torch.clamp(
       target_delta_xy[:, 0],
       min=self.cfg.swing_step_x_min,
@@ -799,6 +800,43 @@ class HLIPReferenceCommand(CommandTerm):
       torch.arange(self.num_envs, device=self.device),
       swing_indices,
     ]
+    swing_active = swing_mask.any(dim=1).float()
+    active_count = torch.clamp(torch.sum(swing_active), min=1.0)
+    swing_foot_pos_l = foot_pos_l[
+      torch.arange(self.num_envs, device=self.device),
+      swing_indices,
+    ]
+    step_error_xy = swing_foot_pos_l[:, :2] - target_delta_xy
+    x_clipped = (
+      torch.abs(target_delta_xy_raw[:, 0] - target_delta_xy[:, 0]) > 1e-6
+    ).float()
+    self.metrics["step_ref_x"] = target_delta_xy[:, 0]
+    self.metrics["step_ref_y"] = target_delta_xy[:, 1]
+    self.metrics["step_actual_x"] = swing_foot_pos_l[:, 0]
+    self.metrics["step_actual_y"] = swing_foot_pos_l[:, 1]
+    self.metrics["step_error_x"] = step_error_xy[:, 0]
+    self.metrics["step_error_y"] = step_error_xy[:, 1]
+    self.metrics["step_x_clip_fraction"] = (
+      torch.sum(x_clipped * swing_active) / active_count
+    )
+    self.metrics["step_ref_x_mean"] = (
+      torch.sum(target_delta_xy[:, 0] * swing_active) / active_count
+    )
+    self.metrics["step_ref_y_mean"] = (
+      torch.sum(target_delta_xy[:, 1] * swing_active) / active_count
+    )
+    self.metrics["step_actual_x_mean"] = (
+      torch.sum(swing_foot_pos_l[:, 0] * swing_active) / active_count
+    )
+    self.metrics["step_actual_y_mean"] = (
+      torch.sum(swing_foot_pos_l[:, 1] * swing_active) / active_count
+    )
+    self.metrics["step_error_x_abs_mean"] = (
+      torch.sum(torch.abs(step_error_xy[:, 0]) * swing_active) / active_count
+    )
+    self.metrics["step_error_y_abs_mean"] = (
+      torch.sum(torch.abs(step_error_xy[:, 1]) * swing_active) / active_count
+    )
     pelvis_rpy_ref, pelvis_rpy_rate_ref = self._pelvis_reference(command)
     ref_swing_foot_rpy = torch.zeros_like(pelvis_rpy_ref)
     ref_swing_foot_rpy[:, 2] = pelvis_rpy_ref[:, 2]

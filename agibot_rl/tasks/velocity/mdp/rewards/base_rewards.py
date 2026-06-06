@@ -53,6 +53,40 @@ class base_acc:
     return torch.exp(-scale * root_acc_norm)
 
 
+class base_acc_l2:
+  def __init__(self, cfg: RewardTermCfg, env: ManagerBasedRlEnv):
+    asset_cfg = cfg.params.get("asset_cfg", _DEFAULT_ASSET_CFG)
+    asset: Entity = env.scene[asset_cfg.name]
+
+    self.asset_name = asset_cfg.name
+    self.prev_root_lin_vel_b = asset.data.root_link_lin_vel_b.clone()
+    self.log_prefix = cfg.params.get("log_prefix", "Metrics/base_acc")
+
+  def __call__(
+    self,
+    env: ManagerBasedRlEnv,
+    asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+    log_prefix: str = "Metrics/base_acc",
+  ) -> torch.Tensor:
+    del asset_cfg, log_prefix
+
+    asset: Entity = env.scene[self.asset_name]
+    root_lin_vel_b = asset.data.root_link_lin_vel_b
+    root_acc = root_lin_vel_b - self.prev_root_lin_vel_b
+    reset = env.episode_length_buf == 0
+    if torch.any(reset):
+      root_acc[reset] = 0.0
+
+    root_acc_norm = torch.linalg.norm(root_acc, dim=1)
+    root_acc_l2 = torch.sum(torch.square(root_acc), dim=1)
+    self.prev_root_lin_vel_b = root_lin_vel_b.clone()
+
+    env.extras.setdefault("log", {})
+    env.extras["log"][f"{self.log_prefix}_mean"] = torch.mean(root_acc_norm)
+    env.extras["log"][f"{self.log_prefix}_l2_mean"] = torch.mean(root_acc_l2)
+    return root_acc_l2
+
+
 def track_linear_velocity(
   env: ManagerBasedRlEnv,
   std: float,
