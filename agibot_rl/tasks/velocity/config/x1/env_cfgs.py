@@ -524,76 +524,30 @@ def agibot_x1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   #   r".*_shoulder_.*": 0.25,
   #   r".*_elbow_.*": 0.2,
   # }
-  # cfg.rewards["pose"].params["asset_cfg"] = SceneEntityCfg(
-  #   "robot",
-  #   joint_names=(
-  #     "left_shoulder_pitch_.*",
-  #     "right_shoulder_pitch_.*",
-  #     "left_shoulder_roll_.*",
-  #     "right_shoulder_roll_.*",
-  #     ".*_elbow_pitch_.*",
-  #   ),
-  # )
-  # cfg.rewards["pose"].params["std_standing"] = {".*": 0.1}
-  # cfg.rewards["pose"].params["std_walking"] = {
-  #   r".*_shoulder_.*": 0.2,
-  #   r".*_elbow_.*": 0.1,
-  # }
-  # cfg.rewards["pose"].params["std_running"] = {
-  #   r".*_shoulder_.*": 0.25,
-  #   r".*_elbow_.*": 0.2,
-  # }
-  cfg.rewards["pose"] = None
-  cfg.rewards["x1_joint_default_pos"] = RewardTermCfg(
-    func=mdp.x1_joint_default_pos,
-    weight=0.8,
-    params={
-      "asset_cfg": SceneEntityCfg(
-        "robot",
-        joint_names=(
-          "lumbar_yaw_.*",
-          "left_hip_roll_.*",
-          "right_hip_roll_.*",
-          "left_hip_yaw_.*",
-          "right_hip_yaw_.*",
-          ".*_ankle_roll_.*",
-          "left_shoulder_roll_.*",
-          "right_shoulder_roll_.*",
-        ),
-      ),
-      "yaw_roll_joint_names": (
-        ("lumbar_yaw_.*",),
-        ("left_hip_roll_.*", "left_hip_yaw_.*", "left_ankle_roll_.*"),
-        ("right_hip_roll_.*", "right_hip_yaw_.*", "right_ankle_roll_.*"),
-        ("left_shoulder_roll_.*", "right_shoulder_roll_.*"),
-      ),
-      "yaw_roll_std": 0.15,
-      "joint_diff_scale": 0.01,
-    },
+  cfg.rewards["pose"].params["asset_cfg"] = SceneEntityCfg(
+    "robot",
+    joint_names=(
+      "lumbar_yaw_.*",
+      "left_shoulder_pitch_.*",
+      "right_shoulder_pitch_.*",
+      "left_shoulder_roll_.*",
+      "right_shoulder_roll_.*",
+      ".*_elbow_pitch_.*",
+    ),
   )
-  cfg.rewards["x1_joint_vel_l2"] = RewardTermCfg(
-    func=mdp.x1_joint_vel_l2,
-    weight=-0.05,
-    params={
-      "asset_cfg": SceneEntityCfg(
-        "robot",
-        joint_names=(
-          "lumbar_yaw_.*",
-          "left_hip_roll_.*",
-          "right_hip_roll_.*",
-          "left_hip_yaw_.*",
-          "right_hip_yaw_.*",
-          ".*_ankle_roll_.*",
-          "left_shoulder_pitch_.*",
-          "right_shoulder_pitch_.*",
-          "left_shoulder_roll_.*",
-          "right_shoulder_roll_.*",
-          ".*_elbow_pitch_.*",
-        ),
-      ),
-      "log_prefix": "Metrics/x1_joint_vel_l2",
-    },
-  )
+  cfg.rewards["pose"].params["std_standing"] = {".*": 0.1}
+  cfg.rewards["pose"].params["std_walking"] = {
+    r"lumbar_yaw_.*": 0.15,
+    r".*_shoulder_.*": 0.2,
+    r".*_elbow_.*": 0.1,
+  }
+  cfg.rewards["pose"].params["std_running"] = {
+    r"lumbar_yaw_.*": 0.15,
+    r".*_shoulder_.*": 0.25,
+    r".*_elbow_.*": 0.2,
+  }
+  cfg.rewards["x1_joint_default_pos"] = None
+  cfg.rewards["x1_joint_vel_l2"] = None
   fixed_joint_names = (
     "lumbar_roll_.*",
     "lumbar_pitch_.*",
