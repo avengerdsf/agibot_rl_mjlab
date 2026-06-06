@@ -675,6 +675,17 @@ class HLIPReferenceCommand(CommandTerm):
       self.dy_act,
       self.dy_out,
     )
+    com_error = com_pos_l - root_ref
+    self.metrics["com_actual_x"] = com_pos_l[:, 0].clone()
+    self.metrics["com_actual_y"] = com_pos_l[:, 1].clone()
+    self.metrics["com_actual_z"] = com_pos_l[:, 2].clone()
+    self.metrics["com_ref_x"] = root_ref[:, 0].clone()
+    self.metrics["com_ref_y"] = root_ref[:, 1].clone()
+    self.metrics["com_ref_z"] = root_ref[:, 2].clone()
+    self.metrics["com_error_x"] = com_error[:, 0].clone()
+    self.metrics["com_error_y"] = com_error[:, 1].clone()
+    self.metrics["com_error_z"] = com_error[:, 2].clone()
+    self.metrics["com_error_xy_norm"] = torch.linalg.norm(com_error[:, :2], dim=1)
     self.metrics["v"] = self.v
     self.metrics["vdot"] = self.vdot
 
@@ -881,12 +892,6 @@ class HLIPReferenceCommand(CommandTerm):
     self.metrics["landing_target_y"] = self.last_landing_target_xy[:, 1].clone()
     self.metrics["landing_error_x"] = self.last_landing_error_xy[:, 0].clone()
     self.metrics["landing_error_y"] = self.last_landing_error_xy[:, 1].clone()
-    self.metrics["landing_error_x_abs"] = (
-      torch.abs(self.last_landing_error_xy[:, 0]) * self.last_landing_valid
-    )
-    self.metrics["landing_error_y_abs"] = (
-      torch.abs(self.last_landing_error_xy[:, 1]) * self.last_landing_valid
-    )
     self.metrics["landing_valid"] = self.last_landing_valid.clone()
     self.metrics["step_x_clipped"] = x_clipped * swing_mask.any(dim=1).float()
     pelvis_rpy_ref, pelvis_rpy_rate_ref = self._pelvis_reference(command)
