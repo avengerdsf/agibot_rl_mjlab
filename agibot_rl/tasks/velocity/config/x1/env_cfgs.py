@@ -211,8 +211,8 @@ def agibot_x1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     reference_command_threshold=0.1,
     foot_site_names=X1_FOOT_SITES,
     swing_clearance=0.12,
-    swing_step_x_min=-0.20,
-    swing_step_x_max=0.35,
+    swing_step_x_min=-0.25,
+    swing_step_x_max=0.50,
     hlip_com_height=0.61,
     hlip_double_support_time=0.1,
     hlip_step_width=0.26,
@@ -242,7 +242,9 @@ def agibot_x1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     preserve_order=True,
   )
 
-  cfg.observations["critic"].terms["foot_height"].params["asset_cfg"] = foot_site_cfg()
+  cfg.observations["critic"].terms.pop("foot_height", None)
+  cfg.observations["critic"].terms.pop("foot_air_time", None)
+  # cfg.observations["critic"].terms["foot_height"].params["asset_cfg"] = foot_site_cfg()
   cfg.observations["critic"].terms.pop("gait_reference_joint_pos_error", None)
   cfg.observations["critic"].terms["hlip_ref_traj"] = ObservationTermCfg(
     func=mdp.hlip_ref_traj,
@@ -262,10 +264,13 @@ def agibot_x1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     params={"command_name": "hlip_ref"},
     clip=(-20.0, 20.0),
   )
-  cfg.observations["critic"].terms["hlip_clf_state"] = ObservationTermCfg(
-    func=mdp.hlip_clf_state,
-    params={"command_name": "hlip_ref"},
-    clip=(-100.0, 100.0),
+  cfg.observations["critic"].terms["foot_vel"] = ObservationTermCfg(
+    func=mdp.foot_vel,
+    params={"asset_cfg": foot_site_cfg()},
+  )
+  cfg.observations["critic"].terms["foot_ang_vel"] = ObservationTermCfg(
+    func=mdp.foot_ang_vel,
+    params={"asset_cfg": foot_site_cfg()},
   )
 
   obs_history_length = 8
@@ -295,9 +300,10 @@ def agibot_x1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   cfg.rewards["track_angular_velocity"].params["std"] = math.sqrt(0.1)
   cfg.rewards["track_linear_velocity"].params["std"] = math.sqrt(0.16)
   cfg.rewards["track_vel_hard"].params["sigma_v"] = 0.30
+  cfg.rewards["track_vel_hard"].weight = 0.80
   cfg.rewards["base_acc"] = RewardTermCfg(
     func=mdp.base_acc_l2,
-    weight=-0.02,
+    weight=-2.0,
     params={
       "asset_cfg": SceneEntityCfg("robot"),
       "log_prefix": "Metrics/base_acc",
@@ -318,8 +324,8 @@ def agibot_x1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     weight=-1.0,
     params={"command_name": "twist", "command_threshold": 0.05},
   )
-  cfg.rewards["foot_clearance"].params["asset_cfg"] = foot_site_cfg()
-  cfg.rewards["foot_clearance"].weight = -1.0
+  cfg.rewards["foot_gait"] = None
+  cfg.rewards["foot_clearance"] = None
   # cfg.rewards["feet_swing_height"] = RewardTermCfg(
   #   func=mdp.feet_swing_height,
   #   weight=-1.0,

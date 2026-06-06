@@ -44,6 +44,20 @@ def foot_contact_forces(env: ManagerBasedRlEnv, sensor_name: str) -> torch.Tenso
   return torch.sign(forces_flat) * torch.log1p(torch.abs(forces_flat))
 
 
+def foot_vel(
+  env: ManagerBasedRlEnv, asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG
+) -> torch.Tensor:
+  asset: Entity = env.scene[asset_cfg.name]
+  return asset.data.site_lin_vel_w[:, asset_cfg.site_ids, :].flatten(start_dim=1)
+
+
+def foot_ang_vel(
+  env: ManagerBasedRlEnv, asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG
+) -> torch.Tensor:
+  asset: Entity = env.scene[asset_cfg.name]
+  return asset.data.site_ang_vel_w[:, asset_cfg.site_ids, :].flatten(start_dim=1)
+
+
 def gait_reference_joint_pos_error(env: ManagerBasedRlEnv, command_name: str) -> torch.Tensor:
   command_term = env.command_manager.get_term(command_name)
   assert command_term is not None

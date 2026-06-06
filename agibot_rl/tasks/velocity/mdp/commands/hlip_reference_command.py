@@ -338,6 +338,13 @@ class HLIPReferenceCommand(CommandTerm):
     self.prev_swing_foot_mask = torch.zeros_like(self.swing_foot_mask)
     self.swing_start_foot_pos_b = self._current_foot_pos_b()
     self.swing_start_foot_pos_l = self._current_foot_pos_b()
+    self.step_target_delta_xy = torch.zeros(
+      self.num_envs, len(self.foot_site_names), 2, device=self.device
+    )
+    self.last_landing_actual_xy = torch.zeros(self.num_envs, 2, device=self.device)
+    self.last_landing_target_xy = torch.zeros_like(self.last_landing_actual_xy)
+    self.last_landing_error_xy = torch.zeros_like(self.last_landing_actual_xy)
+    self.last_landing_valid = torch.zeros(self.num_envs, device=self.device)
     self.stance_idx = torch.zeros(self.num_envs, device=self.device, dtype=torch.long)
     self.swing_idx = torch.ones_like(self.stance_idx)
     self.prev_stance_idx = torch.full_like(self.stance_idx, -1)
@@ -397,6 +404,11 @@ class HLIPReferenceCommand(CommandTerm):
     self.prev_swing_foot_mask[env_ids] = False
     self.swing_start_foot_pos_b[env_ids] = self._current_foot_pos_b()[env_ids]
     self.swing_start_foot_pos_l[env_ids] = self._current_foot_pos_l()[env_ids]
+    self.step_target_delta_xy[env_ids] = 0.0
+    self.last_landing_actual_xy[env_ids] = 0.0
+    self.last_landing_target_xy[env_ids] = 0.0
+    self.last_landing_error_xy[env_ids] = 0.0
+    self.last_landing_valid[env_ids] = 0.0
     foot_pos_w = self._current_foot_pos_w()
     foot_quat_w = self._current_foot_quat_w()
     self.stance_foot_pos_0[env_ids] = foot_pos_w[env_ids, self.stance_idx[env_ids], :]
@@ -659,13 +671,40 @@ class HLIPReferenceCommand(CommandTerm):
     self.cur_swing_time = phase_command.cur_swing_time
     self.stance_idx = phase_command.stance_idx
     self.swing_idx = phase_command.swing_idx
-    self._update_stance_initial_pose()
-    self._update_stance_state()
-    foot_pos_l = self._current_foot_pos_l()
     moving = torch.linalg.norm(command, dim=1) > self.cfg.reference_command_threshold
     left_swing = (self.swing_idx == 0) & moving
     right_swing = (self.swing_idx == 1) & moving
     swing_mask = torch.stack((left_swing, right_swing), dim=1)
+    swing_end = self.prev_swing_foot_mask & ~swing_mask
+    landed = swing_end.any(dim=1)
+    if torch.any(landed):
+      landed_foot_idx = torch.argmax(swing_end.to(torch.long), dim=1)
+      env_ids = torch.arange(self.num_envs, device=self.device)
+      landing_actual_xy = foot_pos_l[env_ids, landed_foot_idx, :2]
+      landing_target_xy = self.step_target_delta_xy[env_ids, landed_foot_idx, :]
+      self.last_landing_actual_xy = torch.where(
+        landed.unsqueeze(1),
+        landing_actual_xy,
+        self.last_landing_actual_xy,
+      )
+      self.last_landing_target_xy = torch.where(
+        landed.unsqueeze(1),
+        landing_target_xy,
+        self.last_landing_target_xy,
+      )
+      self.last_landing_error_xy = torch.where(
+        landed.unsqueeze(1),
+        landing_actual_xy - landing_target_xy,
+        self.last_landing_error_xy,
+      )
+      self.last_landing_valid = torch.where(
+        landed,
+        torch.ones_like(self.last_landing_valid),
+        self.last_landing_valid,
+      )
+    self._update_stance_initial_pose()
+    self._update_stance_state()
+    foot_pos_l = self._current_foot_pos_l()
     swing_start = swing_mask & ~self.prev_swing_foot_mask
     swing_start = swing_start | (self._env.episode_length_buf <= 1).unsqueeze(1)
     self.swing_start_foot_pos_b = torch.where(
@@ -709,6 +748,11 @@ class HLIPReferenceCommand(CommandTerm):
       swing_mask.unsqueeze(-1),
       target_delta_xy.unsqueeze(1),
       target_pos_l[:, :, :2],
+    )
+    self.step_target_delta_xy = torch.where(
+      swing_mask.unsqueeze(-1),
+      target_delta_xy.unsqueeze(1),
+      self.step_target_delta_xy,
     )
 
     horizontal_control = torch.tensor(
@@ -800,24 +844,35 @@ class HLIPReferenceCommand(CommandTerm):
       torch.arange(self.num_envs, device=self.device),
       swing_indices,
     ]
-    swing_active = swing_mask.any(dim=1).float()
-    swing_foot_pos_l = foot_pos_l[
-      torch.arange(self.num_envs, device=self.device),
-      swing_indices,
-    ]
-    step_error_xy = swing_foot_pos_l[:, :2] - target_delta_xy
     x_clipped = (
       torch.abs(target_delta_xy_raw[:, 0] - target_delta_xy[:, 0]) > 1e-6
     ).float()
     self.metrics["step_ref_x"] = target_delta_xy[:, 0]
     self.metrics["step_ref_y"] = target_delta_xy[:, 1]
-    self.metrics["step_actual_x"] = swing_foot_pos_l[:, 0]
-    self.metrics["step_actual_y"] = swing_foot_pos_l[:, 1]
-    self.metrics["step_error_x"] = step_error_xy[:, 0]
-    self.metrics["step_error_y"] = step_error_xy[:, 1]
-    self.metrics["step_error_x_abs"] = torch.abs(step_error_xy[:, 0]) * swing_active
-    self.metrics["step_error_y_abs"] = torch.abs(step_error_xy[:, 1]) * swing_active
-    self.metrics["step_x_clipped"] = x_clipped * swing_active
+    self.metrics["landing_actual_x"] = self.last_landing_actual_xy[:, 0]
+    self.metrics["landing_actual_y"] = self.last_landing_actual_xy[:, 1]
+    self.metrics["landing_target_x"] = self.last_landing_target_xy[:, 0]
+    self.metrics["landing_target_y"] = self.last_landing_target_xy[:, 1]
+    self.metrics["landing_error_x"] = self.last_landing_error_xy[:, 0]
+    self.metrics["landing_error_y"] = self.last_landing_error_xy[:, 1]
+    self.metrics["landing_error_x_abs"] = (
+      torch.abs(self.last_landing_error_xy[:, 0]) * self.last_landing_valid
+    )
+    self.metrics["landing_error_y_abs"] = (
+      torch.abs(self.last_landing_error_xy[:, 1]) * self.last_landing_valid
+    )
+    self.metrics["landing_valid"] = self.last_landing_valid
+    self.metrics["step_actual_x"] = self.last_landing_actual_xy[:, 0]
+    self.metrics["step_actual_y"] = self.last_landing_actual_xy[:, 1]
+    self.metrics["step_error_x"] = self.last_landing_error_xy[:, 0]
+    self.metrics["step_error_y"] = self.last_landing_error_xy[:, 1]
+    self.metrics["step_error_x_abs"] = (
+      torch.abs(self.last_landing_error_xy[:, 0]) * self.last_landing_valid
+    )
+    self.metrics["step_error_y_abs"] = (
+      torch.abs(self.last_landing_error_xy[:, 1]) * self.last_landing_valid
+    )
+    self.metrics["step_x_clipped"] = x_clipped * swing_mask.any(dim=1).float()
     pelvis_rpy_ref, pelvis_rpy_rate_ref = self._pelvis_reference(command)
     ref_swing_foot_rpy = torch.zeros_like(pelvis_rpy_ref)
     ref_swing_foot_rpy[:, 2] = pelvis_rpy_ref[:, 2]
