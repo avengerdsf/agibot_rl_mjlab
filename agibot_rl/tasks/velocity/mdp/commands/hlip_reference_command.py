@@ -699,8 +699,15 @@ class HLIPReferenceCommand(CommandTerm):
     if torch.any(landed):
       landed_foot_idx = torch.argmax(landing_mask.to(torch.long), dim=1)
       env_ids = torch.arange(self.num_envs, device=self.device)
-      landing_actual_xy = foot_pos_l[env_ids, landed_foot_idx, :2]
-      landing_target_xy = self.step_target_delta_xy[env_ids, landed_foot_idx, :]
+      landing_target_xy_l = self.step_target_delta_xy[env_ids, landed_foot_idx, :]
+      landing_actual_xy = self._current_foot_pos_w()[env_ids, landed_foot_idx, :2]
+      landing_target_l = torch.zeros(self.num_envs, 3, device=self.device)
+      landing_target_l[:, :2] = landing_target_xy_l
+      landing_target_w = self.stance_foot_pos_0 + quat_apply(
+        self.stance_foot_ori_quat_0,
+        landing_target_l,
+      )
+      landing_target_xy = landing_target_w[:, :2]
       self.last_landing_actual_xy = torch.where(
         landed.unsqueeze(1),
         landing_actual_xy,
@@ -881,16 +888,6 @@ class HLIPReferenceCommand(CommandTerm):
       torch.abs(self.last_landing_error_xy[:, 1]) * self.last_landing_valid
     )
     self.metrics["landing_valid"] = self.last_landing_valid.clone()
-    self.metrics["step_actual_x"] = self.last_landing_actual_xy[:, 0].clone()
-    self.metrics["step_actual_y"] = self.last_landing_actual_xy[:, 1].clone()
-    self.metrics["step_error_x"] = self.last_landing_error_xy[:, 0].clone()
-    self.metrics["step_error_y"] = self.last_landing_error_xy[:, 1].clone()
-    self.metrics["step_error_x_abs"] = (
-      torch.abs(self.last_landing_error_xy[:, 0]) * self.last_landing_valid
-    )
-    self.metrics["step_error_y_abs"] = (
-      torch.abs(self.last_landing_error_xy[:, 1]) * self.last_landing_valid
-    )
     self.metrics["step_x_clipped"] = x_clipped * swing_mask.any(dim=1).float()
     pelvis_rpy_ref, pelvis_rpy_rate_ref = self._pelvis_reference(command)
     ref_swing_foot_rpy = torch.zeros_like(pelvis_rpy_ref)
