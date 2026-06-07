@@ -29,6 +29,7 @@ HLIP_CLF_Q_WEIGHTS = (
   30.0, 1.0,
   10.0, 1.0,
   400.0, 10.0,
+  500.0, 10.0,
   40.0, 1.0,
   40.0, 1.0,
   100.0, 1.0,
@@ -43,6 +44,7 @@ HLIP_CLF_R_WEIGHTS = (
   0.05, 0.05, 0.05,
   0.05, 0.05, 0.05,
   0.02, 0.02, 0.02,
+  0.1,
   0.01, 0.01, 0.01,
   0.01, 0.01, 0.01,
   0.01, 0.01,
@@ -353,9 +355,9 @@ class HLIPReferenceCommand(CommandTerm):
     self.upper_body_joint_ids, self.upper_body_joint_names = self.robot.find_joints(
       cfg.upper_body_joint_names
     )
-    if len(self.upper_body_joint_ids) != 8:
+    if len(self.upper_body_joint_ids) != 9:
       raise ValueError(
-        "HLIP upper-body reference expects 8 joints in X1 order, "
+        "HLIP upper-body reference expects 9 joints in X1 order, "
         f"got {len(self.upper_body_joint_ids)}: {self.upper_body_joint_names}."
       )
     self.upper_body_joint_ids_tensor = torch.as_tensor(
@@ -403,6 +405,21 @@ class HLIPReferenceCommand(CommandTerm):
     self.ref_joint_ids_tensor = torch.empty(0, device=self.device, dtype=torch.long)
     # COM xyz, pelvis rpy, swing foot xyz/rpy, then target-project upper-body joints.
     self.n_outputs = 6 + 3 * len(self.foot_body_names) + len(self.upper_body_joint_ids)
+    self.output_names = (
+      "com_x",
+      "com_y",
+      "com_z",
+      "pelvis_roll",
+      "pelvis_pitch",
+      "pelvis_yaw",
+      "swing_foot_x",
+      "swing_foot_y",
+      "swing_foot_z",
+      "swing_foot_roll",
+      "swing_foot_pitch",
+      "swing_foot_yaw",
+      *self.upper_body_joint_names,
+    )
     self.y_out = torch.zeros(self.num_envs, self.n_outputs, device=self.device)
     self.y_act = torch.zeros_like(self.y_out)
     self.dy_out = torch.zeros_like(self.y_out)
@@ -589,17 +606,20 @@ class HLIPReferenceCommand(CommandTerm):
     foot_pos_w = self._current_foot_pos_w()
     foot_rpy = self._current_foot_rpy()
     foot_vel_w = self.robot.data.body_link_lin_vel_w[:, self.foot_body_ids_tensor, :]
-    foot_rpy_rate = self._rpy_rate_from_previous(foot_rpy, self.prev_foot_rpy)
+    foot_ang_vel_w = self.robot.data.body_link_ang_vel_w[:, self.foot_body_ids_tensor, :]
+    foot_ang_vel = quat_apply_inverse(
+      self._current_foot_quat_w().reshape(-1, 4),
+      foot_ang_vel_w.reshape(-1, 3),
+    ).reshape(self.num_envs, len(self.foot_body_names), 3)
     pelvis_rpy = self._current_pelvis_rpy()
-    pelvis_rpy_rate = self._rpy_rate_from_previous(pelvis_rpy, self.prev_pelvis_rpy)
     self.foot_rpy = foot_rpy
-    self.foot_rpy_rate = foot_rpy_rate
+    self.foot_rpy_rate = foot_ang_vel
     self.pelvis_rpy = pelvis_rpy
-    self.pelvis_rpy_rate = pelvis_rpy_rate
+    self.pelvis_rpy_rate = self.robot.data.root_link_ang_vel_b
     self.stance_foot_pos = foot_pos_w[env_ids, self.stance_idx, :]
     self.stance_foot_ori = foot_rpy[env_ids, self.stance_idx, :]
     self.stance_foot_vel = foot_vel_w[env_ids, self.stance_idx, :]
-    self.stance_foot_rpy_rate = foot_rpy_rate[env_ids, self.stance_idx, :]
+    self.stance_foot_rpy_rate = foot_ang_vel[env_ids, self.stance_idx, :]
 
   def _update_phase_state(self) -> None:
     elapsed = self._env.episode_length_buf.to(self.device) * self._env.step_dt
@@ -652,8 +672,10 @@ class HLIPReferenceCommand(CommandTerm):
     phase = 2.0 * torch.pi * self.phase
     sh_pitch0, sh_roll0, sh_yaw0 = self.cfg.shoulder_ref
     elb0 = self.cfg.elbow_ref
+    waist_yaw0 = self.cfg.waist_yaw_ref
     amp = torch.stack(
       (
+        waist_yaw0 * torch.ones_like(forward_vel),
         sh_pitch0 * forward_vel,
         sh_pitch0 * forward_vel,
         sh_roll0 * torch.ones_like(forward_vel),
@@ -666,12 +688,13 @@ class HLIPReferenceCommand(CommandTerm):
       dim=1,
     )
     sign = torch.tensor(
-      (1.0, -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0),
+      (1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0),
       device=self.device,
       dtype=amp.dtype,
     )
     offset = torch.tensor(
       (
+        torch.pi,
         torch.pi / 2.0,
         torch.pi / 2.0,
         torch.pi / 2.0,
@@ -1086,6 +1109,7 @@ class HLIPReferenceCommandCfg(CommandTermCfg):
   hlip_double_support_time: float = 0.1
   hlip_step_width: float = 0.26
   upper_body_joint_names: tuple[str, ...] = (
+    "lumbar_yaw_.*",
     "left_shoulder_pitch_.*",
     "right_shoulder_pitch_.*",
     "left_shoulder_roll_.*",
@@ -1095,6 +1119,7 @@ class HLIPReferenceCommandCfg(CommandTermCfg):
     "left_elbow_pitch_.*",
     "right_elbow_pitch_.*",
   )
+  waist_yaw_ref: float = 0.0
   shoulder_ref: tuple[float, float, float] = (0.16, 0.0, 0.0)
   elbow_ref: float = 0.1
   q_weights: tuple[float, ...] = HLIP_CLF_Q_WEIGHTS

@@ -169,19 +169,30 @@ def clf_reward(
     torch.zeros(0, device=command_term.v.device),
   )
   if y_err.numel() > 0 and dy_err.numel() > 0:
-    env.extras["log"]["Metrics/hlip_clf/max_abs_y_err"] = torch.max(torch.abs(y_err))
-    env.extras["log"]["Metrics/hlip_clf/max_abs_dy_err"] = torch.max(torch.abs(dy_err))
+    y_err_abs = torch.abs(y_err)
+    dy_err_abs = torch.abs(dy_err)
+    env.extras["log"]["Metrics/hlip_clf/max_abs_y_err"] = torch.max(y_err_abs)
+    env.extras["log"]["Metrics/hlip_clf/max_abs_dy_err"] = torch.max(dy_err_abs)
+    y_err_dim_max = torch.max(y_err_abs, dim=0).values
+    dy_err_dim_max = torch.max(dy_err_abs, dim=0).values
+    env.extras["log"]["Metrics/hlip_clf/max_abs_y_err_dim"] = torch.argmax(y_err_dim_max)
+    env.extras["log"]["Metrics/hlip_clf/max_abs_dy_err_dim"] = torch.argmax(dy_err_dim_max)
+    output_names = getattr(command_term, "output_names", ())
+    if len(output_names) == y_err.shape[1]:
+      for idx, name in enumerate(output_names):
+        env.extras["log"][f"Metrics/hlip_clf/y_err_max_by_dim/{name}"] = y_err_dim_max[idx]
+        env.extras["log"][f"Metrics/hlip_clf/dy_err_max_by_dim/{name}"] = dy_err_dim_max[idx]
     env.extras["log"]["Metrics/hlip_clf/pelvis_yaw_err_abs_mean"] = torch.mean(
-      torch.abs(y_err[:, 5])
+      y_err_abs[:, 5]
     )
     env.extras["log"]["Metrics/hlip_clf/swing_foot_yaw_err_abs_mean"] = torch.mean(
-      torch.abs(y_err[:, 11])
+      y_err_abs[:, 11]
     )
     env.extras["log"]["Metrics/hlip_clf/pelvis_yaw_rate_err_abs_mean"] = torch.mean(
-      torch.abs(dy_err[:, 5])
+      dy_err_abs[:, 5]
     )
     env.extras["log"]["Metrics/hlip_clf/swing_foot_yaw_rate_err_abs_mean"] = torch.mean(
-      torch.abs(dy_err[:, 11])
+      dy_err_abs[:, 11]
     )
   return reward
 
