@@ -245,7 +245,7 @@ def holonomic_constraint_vel(
   sigma_vel: float,
 ) -> torch.Tensor:
   command_term = env.command_manager.get_term(command_name)
-  yaw_rate = command_term.stance_foot_ang_vel[:, 2].unsqueeze(1)
+  yaw_rate = command_term.stance_foot_rpy_rate[:, 2].unsqueeze(1)
   vel_error = torch.cat((command_term.stance_foot_vel, yaw_rate), dim=1)
   error_norm = torch.sum(torch.square(vel_error), dim=1)
   env.extras.setdefault("log", {})

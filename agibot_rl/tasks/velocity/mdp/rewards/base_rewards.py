@@ -1027,6 +1027,24 @@ class variable_posture:
     return torch.exp(-torch.mean(error_squared / (std**2), dim=1))
 
 
+def joint_pos_limit(
+        env: ManagerBasedRlEnv,
+        limit: float,
+        asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+        log_prefix: str = "Metrics/joint_pos_limit",
+) -> torch.Tensor:
+    asset: Entity = env.scene[asset_cfg.name]
+    diff_angle = asset.data.joint_pos[:, asset_cfg.joint_ids] - asset.data.default_joint_pos[:, asset_cfg.joint_ids]
+    abs_error = torch.abs(diff_angle)
+    excess = torch.clamp(abs_error - limit, min=0.0)
+    penalty = torch.mean(torch.square(excess), dim=1)
+
+    env.extras.setdefault("log", {})
+    env.extras["log"][f"{log_prefix}/abs_error_mean"] = torch.mean(abs_error)
+    env.extras["log"][f"{log_prefix}/excess_mean"] = torch.mean(excess)
+    return penalty
+
+
 def stand_still(
         env: ManagerBasedRlEnv,
         command_name: str,

@@ -275,11 +275,6 @@ def agibot_x1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     func=mdp.foot_vel,
     params={"asset_cfg": foot_body_cfg()},
   )
-  cfg.observations["critic"].terms["foot_ang_vel"] = ObservationTermCfg(
-    func=mdp.foot_ang_vel,
-    params={"asset_cfg": foot_body_cfg()},
-  )
-
   obs_history_length = 8
 
   cfg.observations["actor"].terms = stack_observation_terms(
@@ -567,6 +562,15 @@ def agibot_x1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     params={
       "asset_cfg": SceneEntityCfg("robot", joint_names=fixed_joint_names),
       "log_prefix": "Metrics/x1_fixed_joint_vel_l2",
+    },
+  )
+  cfg.rewards["x1_lumbar_yaw_limit"] = RewardTermCfg(
+    func=mdp.joint_pos_limit,
+    weight=-1.0,
+    params={
+      "limit": 0.45,
+      "asset_cfg": SceneEntityCfg("robot", joint_names=("lumbar_yaw_.*",)),
+      "log_prefix": "Metrics/x1_lumbar_yaw_limit",
     },
   )
 
