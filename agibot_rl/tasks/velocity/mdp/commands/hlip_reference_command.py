@@ -134,6 +134,24 @@ def _euler_rates_to_omega(eul: torch.Tensor, eul_rates: torch.Tensor) -> torch.T
   return torch.einsum("bij,bj->bi", matrix, eul_rates)
 
 
+def _quat_conjugate(quat: torch.Tensor) -> torch.Tensor:
+  return torch.cat((quat[..., :1], -quat[..., 1:]), dim=-1)
+
+
+def _quat_mul(lhs: torch.Tensor, rhs: torch.Tensor) -> torch.Tensor:
+  lw, lx, ly, lz = lhs.unbind(-1)
+  rw, rx, ry, rz = rhs.unbind(-1)
+  return torch.stack(
+    (
+      lw * rw - lx * rx - ly * ry - lz * rz,
+      lw * rx + lx * rw + ly * rz - lz * ry,
+      lw * ry - lx * rz + ly * rw + lz * rx,
+      lw * rz + lx * ry - ly * rx + lz * rw,
+    ),
+    dim=-1,
+  )
+
+
 class _ContinuousTimeClf:
   # 根据输出误差构造一个二次型李雅普诺夫函数，然后再利用差分近似计算李雅普诺夫函数的变化率
   def __init__(
@@ -355,6 +373,30 @@ class HLIPReferenceCommand(CommandTerm):
     self.upper_body_joint_ids, self.upper_body_joint_names = self.robot.find_joints(
       cfg.upper_body_joint_names
     )
+    upper_body_order = (
+      "lumbar_yaw",
+      "left_shoulder_pitch",
+      "right_shoulder_pitch",
+      "left_shoulder_roll",
+      "right_shoulder_roll",
+      "left_shoulder_yaw",
+      "right_shoulder_yaw",
+      "left_elbow_pitch",
+      "right_elbow_pitch",
+    )
+    ordered_joint_ids = []
+    ordered_joint_names = []
+    for joint_key in upper_body_order:
+      matches = [
+        (joint_id, joint_name)
+        for joint_id, joint_name in zip(self.upper_body_joint_ids, self.upper_body_joint_names)
+        if joint_key in joint_name
+      ]
+      if len(matches) == 1:
+        ordered_joint_ids.append(matches[0][0])
+        ordered_joint_names.append(matches[0][1])
+    self.upper_body_joint_ids = ordered_joint_ids
+    self.upper_body_joint_names = ordered_joint_names
     if len(self.upper_body_joint_ids) != 9:
       raise ValueError(
         "HLIP upper-body reference expects 9 joints in X1 order, "
@@ -673,40 +715,33 @@ class HLIPReferenceCommand(CommandTerm):
     sh_pitch0, sh_roll0, sh_yaw0 = self.cfg.shoulder_ref
     elb0 = self.cfg.elbow_ref
     waist_yaw0 = self.cfg.waist_yaw_ref
-    amp = torch.stack(
-      (
-        waist_yaw0 * torch.ones_like(forward_vel),
-        sh_pitch0 * forward_vel,
-        sh_pitch0 * forward_vel,
-        sh_roll0 * torch.ones_like(forward_vel),
-        sh_roll0 * torch.ones_like(forward_vel),
-        sh_yaw0 * torch.ones_like(forward_vel),
-        sh_yaw0 * torch.ones_like(forward_vel),
-        elb0 * forward_vel,
-        elb0 * forward_vel,
-      ),
-      dim=1,
-    )
-    sign = torch.tensor(
-      (1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0),
+    amp = torch.zeros(
+      self.num_envs,
+      len(self.upper_body_joint_names),
       device=self.device,
-      dtype=amp.dtype,
+      dtype=forward_vel.dtype,
     )
-    offset = torch.tensor(
-      (
-        torch.pi,
-        torch.pi / 2.0,
-        torch.pi / 2.0,
-        torch.pi / 2.0,
-        torch.pi / 2.0,
-        0.0,
-        0.0,
-        torch.pi / 2.0,
-        torch.pi / 2.0,
-      ),
-      device=self.device,
-      dtype=amp.dtype,
-    )
+    sign = torch.ones_like(amp)
+    offset = torch.zeros_like(amp)
+    for joint_idx, joint_name in enumerate(self.upper_body_joint_names):
+      if joint_name == "lumbar_yaw_joint":
+        amp[:, joint_idx] = waist_yaw0
+        offset[:, joint_idx] = torch.pi
+      elif "shoulder_pitch" in joint_name:
+        amp[:, joint_idx] = sh_pitch0 * forward_vel
+        sign[:, joint_idx] = 1.0 if joint_name.startswith("left_") else -1.0
+        offset[:, joint_idx] = torch.pi / 2.0
+      elif "shoulder_roll" in joint_name:
+        amp[:, joint_idx] = sh_roll0
+        sign[:, joint_idx] = 1.0 if joint_name.startswith("left_") else -1.0
+        offset[:, joint_idx] = torch.pi / 2.0
+      elif "shoulder_yaw" in joint_name:
+        amp[:, joint_idx] = sh_yaw0
+        sign[:, joint_idx] = 1.0 if joint_name.startswith("left_") else -1.0
+      elif "elbow_pitch" in joint_name:
+        amp[:, joint_idx] = elb0 * forward_vel
+        sign[:, joint_idx] = 1.0 if joint_name.startswith("left_") else -1.0
+        offset[:, joint_idx] = torch.pi / 2.0
     default_joint_pos = self.robot.data.default_joint_pos[
       :, self.upper_body_joint_ids_tensor
     ]
@@ -752,6 +787,7 @@ class HLIPReferenceCommand(CommandTerm):
       dtype=foot_pos_b.dtype,
     )
     del foot_pos_b
+    foot_quat_w = self._current_foot_quat_w()
     swing_indices = torch.where(left_swing, 0, 1)
     swing_foot_pos_l = foot_pos_l[
       torch.arange(self.num_envs, device=self.device),
@@ -765,6 +801,13 @@ class HLIPReferenceCommand(CommandTerm):
       torch.arange(self.num_envs, device=self.device),
       swing_indices,
     ].clone()
+    swing_foot_quat_w = foot_quat_w[
+      torch.arange(self.num_envs, device=self.device),
+      swing_indices,
+    ]
+    swing_foot_rpy[:, :2] = self._quat_to_rpy(
+      _quat_mul(_quat_conjugate(self.stance_foot_ori_quat_0), swing_foot_quat_w)
+    )[:, :2]
     swing_foot_rpy_rate = foot_rpy_rate[
       torch.arange(self.num_envs, device=self.device),
       swing_indices,
