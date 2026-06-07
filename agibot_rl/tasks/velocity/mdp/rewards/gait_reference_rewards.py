@@ -205,6 +205,37 @@ def clf_reward(
         if dy_act_dim_mean is not None and dy_ref_dim_mean is not None:
           env.extras["log"][f"Metrics/hlip_clf/dy_act_mean_by_dim/{name}"] = dy_act_dim_mean[idx]
           env.extras["log"][f"Metrics/hlip_clf/dy_ref_mean_by_dim/{name}"] = dy_ref_dim_mean[idx]
+      upper_body_joint_names = getattr(command_term, "upper_body_joint_names", ())
+      upper_body_joint_pos = getattr(command_term, "upper_body_joint_pos", None)
+      upper_body_joint_vel = getattr(command_term, "upper_body_joint_vel", None)
+      upper_body_joint_pos_diff_vel = getattr(
+        command_term,
+        "upper_body_joint_pos_diff_vel",
+        None,
+      )
+      if (
+        upper_body_joint_pos is not None
+        and upper_body_joint_vel is not None
+        and upper_body_joint_pos_diff_vel is not None
+        and len(upper_body_joint_names) == upper_body_joint_pos.shape[1]
+        and upper_body_joint_vel.shape == upper_body_joint_pos.shape
+        and upper_body_joint_pos_diff_vel.shape == upper_body_joint_pos.shape
+      ):
+        upper_body_joint_pos_mean = torch.mean(torch.abs(upper_body_joint_pos), dim=0)
+        upper_body_joint_vel_mean = torch.mean(torch.abs(upper_body_joint_vel), dim=0)
+        upper_body_joint_pos_diff_vel_mean = torch.mean(
+          torch.abs(upper_body_joint_pos_diff_vel),
+          dim=0,
+        )
+        upper_body_joint_vel_diff_mean = torch.mean(
+          torch.abs(upper_body_joint_vel - upper_body_joint_pos_diff_vel),
+          dim=0,
+        )
+        for idx, name in enumerate(upper_body_joint_names):
+          env.extras["log"][f"Metrics/hlip_clf/upper_body_joint_pos_abs_mean/{name}"] = upper_body_joint_pos_mean[idx]
+          env.extras["log"][f"Metrics/hlip_clf/upper_body_joint_vel_abs_mean/{name}"] = upper_body_joint_vel_mean[idx]
+          env.extras["log"][f"Metrics/hlip_clf/upper_body_joint_pos_diff_vel_abs_mean/{name}"] = upper_body_joint_pos_diff_vel_mean[idx]
+          env.extras["log"][f"Metrics/hlip_clf/upper_body_joint_vel_diff_abs_mean/{name}"] = upper_body_joint_vel_diff_mean[idx]
     env.extras["log"]["Metrics/hlip_clf/pelvis_yaw_err_abs_mean"] = torch.mean(
       y_err_abs[:, 5]
     )

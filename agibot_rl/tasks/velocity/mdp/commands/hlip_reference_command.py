@@ -466,6 +466,14 @@ class HLIPReferenceCommand(CommandTerm):
     self.y_act = torch.zeros_like(self.y_out)
     self.dy_out = torch.zeros_like(self.y_out)
     self.dy_act = torch.zeros_like(self.y_out)
+    self.upper_body_joint_pos = torch.zeros(
+      self.num_envs, len(self.upper_body_joint_ids), device=self.device
+    )
+    self.upper_body_joint_vel = torch.zeros_like(self.upper_body_joint_pos)
+    self.prev_upper_body_joint_pos = self.robot.data.joint_pos[
+      :, self.upper_body_joint_ids_tensor
+    ].clone()
+    self.upper_body_joint_pos_diff_vel = torch.zeros_like(self.upper_body_joint_pos)
     self.v = torch.zeros(self.num_envs, device=self.device)
     self.vdot = torch.zeros_like(self.v)
     self.clf = _ContinuousTimeClf(
@@ -516,6 +524,15 @@ class HLIPReferenceCommand(CommandTerm):
     self.stance_foot_ori_0[env_ids] = self._foot_quat_to_rpy(
       self.stance_foot_ori_quat_0[env_ids]
     )
+    current_upper_body_joint_pos = self.robot.data.joint_pos[
+      :, self.upper_body_joint_ids_tensor
+    ]
+    self.upper_body_joint_pos[env_ids] = current_upper_body_joint_pos[env_ids]
+    self.upper_body_joint_vel[env_ids] = self.robot.data.joint_vel[
+      :, self.upper_body_joint_ids_tensor
+    ][env_ids]
+    self.prev_upper_body_joint_pos[env_ids] = current_upper_body_joint_pos[env_ids]
+    self.upper_body_joint_pos_diff_vel[env_ids] = 0.0
     self.prev_stance_idx[env_ids] = self.stance_idx[env_ids]
     self.clf.reset(env_ids)
 
@@ -849,6 +866,19 @@ class HLIPReferenceCommand(CommandTerm):
     root_ref[:, 1] = sin_yaw * root_ref_xy[:, 0] + cos_yaw * root_ref_xy[:, 1]
     root_ref_vel[:, 0] = cos_yaw * root_ref_vel_xy[:, 0] - sin_yaw * root_ref_vel_xy[:, 1]
     root_ref_vel[:, 1] = sin_yaw * root_ref_vel_xy[:, 0] + cos_yaw * root_ref_vel_xy[:, 1]
+    current_upper_body_joint_pos = self.robot.data.joint_pos[
+      :, self.upper_body_joint_ids_tensor
+    ]
+    current_upper_body_joint_vel = self.robot.data.joint_vel[
+      :, self.upper_body_joint_ids_tensor
+    ]
+    self.upper_body_joint_pos_diff_vel = (
+      wrap_to_pi(current_upper_body_joint_pos - self.prev_upper_body_joint_pos)
+      / max(self._env.step_dt, 1e-6)
+    )
+    self.upper_body_joint_pos = current_upper_body_joint_pos
+    self.upper_body_joint_vel = current_upper_body_joint_vel
+    self.prev_upper_body_joint_pos = current_upper_body_joint_pos.clone()
 
     self.y_out = torch.cat(
       (
@@ -866,7 +896,7 @@ class HLIPReferenceCommand(CommandTerm):
         pelvis_rpy,
         swing_foot_pos_l,
         swing_foot_rpy,
-        self.robot.data.joint_pos[:, self.upper_body_joint_ids_tensor],
+        current_upper_body_joint_pos,
       ),
       dim=1,
     )
@@ -886,7 +916,7 @@ class HLIPReferenceCommand(CommandTerm):
         self.pelvis_rpy_rate,
         swing_foot_vel_l,
         swing_foot_rpy_rate,
-        self.robot.data.joint_vel[:, self.upper_body_joint_ids_tensor],
+        current_upper_body_joint_vel,
       ),
       dim=1,
     )
