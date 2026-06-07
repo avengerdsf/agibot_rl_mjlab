@@ -48,14 +48,14 @@ def foot_vel(
   env: ManagerBasedRlEnv, asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG
 ) -> torch.Tensor:
   asset: Entity = env.scene[asset_cfg.name]
-  return asset.data.body_lin_vel_w[:, asset_cfg.body_ids, :].flatten(start_dim=1)
+  return asset.data.body_link_lin_vel_w[:, asset_cfg.body_ids, :].flatten(start_dim=1)
 
 
 def foot_ang_vel(
   env: ManagerBasedRlEnv, asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG
 ) -> torch.Tensor:
   asset: Entity = env.scene[asset_cfg.name]
-  return asset.data.body_ang_vel_w[:, asset_cfg.body_ids, :].flatten(start_dim=1)
+  return asset.data.body_link_ang_vel_w[:, asset_cfg.body_ids, :].flatten(start_dim=1)
 
 
 def gait_reference_joint_pos_error(env: ManagerBasedRlEnv, command_name: str) -> torch.Tensor:

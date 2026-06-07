@@ -516,7 +516,7 @@ def swing_foot_trajectory(
     )
 
   asset: Entity = env.scene[asset_cfg.name]
-  foot_pos_w = asset.data.body_pos_w[:, asset_cfg.body_ids, :]
+  foot_pos_w = asset.data.body_link_pos_w[:, asset_cfg.body_ids, :]
   root_pos_w = asset.data.root_link_pos_w.unsqueeze(1)
   root_quat_w = asset.data.root_link_quat_w.unsqueeze(1).expand(
     foot_pos_w.shape[0], foot_pos_w.shape[1], 4

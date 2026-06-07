@@ -454,10 +454,10 @@ class HLIPReferenceCommand(CommandTerm):
     self._update_reference()
 
   def _current_foot_pos_w(self) -> torch.Tensor:
-    return self.robot.data.body_pos_w[:, self.foot_body_ids_tensor, :]
+    return self.robot.data.body_link_pos_w[:, self.foot_body_ids_tensor, :]
 
   def _current_foot_quat_w(self) -> torch.Tensor:
-    return self.robot.data.body_quat_w[:, self.foot_body_ids_tensor, :]
+    return self.robot.data.body_link_quat_w[:, self.foot_body_ids_tensor, :]
 
   def _quat_to_rpy(self, quat: torch.Tensor) -> torch.Tensor:
     roll, pitch, yaw = euler_xyz_from_quat(quat)
@@ -511,7 +511,7 @@ class HLIPReferenceCommand(CommandTerm):
     ).reshape(self.num_envs, len(self.foot_body_names), 3)
 
   def _current_foot_vel_b(self) -> torch.Tensor:
-    foot_vel_w = self.robot.data.body_lin_vel_w[:, self.foot_body_ids_tensor, :]
+    foot_vel_w = self.robot.data.body_link_lin_vel_w[:, self.foot_body_ids_tensor, :]
     root_quat_w = self.robot.data.root_link_quat_w.unsqueeze(1).expand(
       foot_vel_w.shape[0], foot_vel_w.shape[1], 4
     )
@@ -521,7 +521,7 @@ class HLIPReferenceCommand(CommandTerm):
     ).reshape(self.num_envs, len(self.foot_body_names), 3)
 
   def _current_foot_vel_l(self) -> torch.Tensor:
-    foot_vel_w = self.robot.data.body_lin_vel_w[:, self.foot_body_ids_tensor, :]
+    foot_vel_w = self.robot.data.body_link_lin_vel_w[:, self.foot_body_ids_tensor, :]
     stance_quat = self.stance_foot_ori_quat_0.unsqueeze(1).expand(
       foot_vel_w.shape[0], foot_vel_w.shape[1], 4
     )
@@ -531,7 +531,7 @@ class HLIPReferenceCommand(CommandTerm):
     ).reshape(self.num_envs, len(self.foot_body_names), 3)
 
   def _current_foot_ang_vel_local(self) -> torch.Tensor:
-    foot_ang_vel_w = self.robot.data.body_ang_vel_w[:, self.foot_body_ids_tensor, :]
+    foot_ang_vel_w = self.robot.data.body_link_ang_vel_w[:, self.foot_body_ids_tensor, :]
     foot_quat_w = self._current_foot_quat_w()
     return quat_apply(
       quat_inv(foot_quat_w.reshape(-1, 4)),
@@ -569,8 +569,8 @@ class HLIPReferenceCommand(CommandTerm):
     env_ids = torch.arange(self.num_envs, device=self.device)
     foot_pos_w = self._current_foot_pos_w()
     foot_rpy = self._current_foot_rpy()
-    foot_vel_w = self.robot.data.body_lin_vel_w[:, self.foot_body_ids_tensor, :]
-    foot_ang_vel_w = self.robot.data.body_ang_vel_w[:, self.foot_body_ids_tensor, :]
+    foot_vel_w = self.robot.data.body_link_lin_vel_w[:, self.foot_body_ids_tensor, :]
+    foot_ang_vel_w = self.robot.data.body_link_ang_vel_w[:, self.foot_body_ids_tensor, :]
     self.stance_foot_pos = foot_pos_w[env_ids, self.stance_idx, :]
     self.stance_foot_ori = foot_rpy[env_ids, self.stance_idx, :]
     self.stance_foot_vel = foot_vel_w[env_ids, self.stance_idx, :]
