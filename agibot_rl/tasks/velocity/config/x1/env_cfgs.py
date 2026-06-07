@@ -301,15 +301,15 @@ def agibot_x1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   cfg.observations["critic"].enable_corruption = False
 
 
-  # cfg.rewards["track_linear_velocity"].weight = 1.0
-  # cfg.rewards["track_angular_velocity"].weight = 1.0
-  # cfg.rewards["track_linear_velocity"].params["std"] = math.sqrt(0.16)
-  # cfg.rewards["track_angular_velocity"].params["std"] = math.sqrt(0.1)
-  # cfg.rewards["track_vel_hard"].params["sigma_v"] = 0.30
-  # cfg.rewards["track_vel_hard"].weight = 0.80
-  cfg.rewards["track_linear_velocity"] = None
-  cfg.rewards["track_angular_velocity"] = None
-  cfg.rewards["track_vel_hard"]  = None
+  cfg.rewards["track_linear_velocity"].weight = 1.0
+  cfg.rewards["track_angular_velocity"].weight = 1.0
+  cfg.rewards["track_linear_velocity"].params["std"] = math.sqrt(0.16)
+  cfg.rewards["track_angular_velocity"].params["std"] = math.sqrt(0.1)
+  cfg.rewards["track_vel_hard"].params["sigma_v"] = 0.30
+  cfg.rewards["track_vel_hard"].weight = 0.80
+  # cfg.rewards["track_linear_velocity"] = None
+  # cfg.rewards["track_angular_velocity"] = None
+  # cfg.rewards["track_vel_hard"]  = None
 
 
 
