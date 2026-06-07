@@ -747,8 +747,8 @@ class HLIPReferenceCommand(CommandTerm):
     ]
     ref = (
       amp
-      * sign.unsqueeze(0)
-      * torch.sin(phase.unsqueeze(1) + offset.unsqueeze(0))
+      * sign
+      * torch.sin(phase.unsqueeze(1) + offset)
       + default_joint_pos
     )
     dphase_dt = 2.0 * torch.pi / torch.clamp(
@@ -757,8 +757,8 @@ class HLIPReferenceCommand(CommandTerm):
     )
     ref_dot = (
       amp
-      * sign.unsqueeze(0)
-      * torch.cos(phase.unsqueeze(1) + offset.unsqueeze(0))
+      * sign
+      * torch.cos(phase.unsqueeze(1) + offset)
       * dphase_dt.unsqueeze(1)
     )
     return ref, ref_dot
