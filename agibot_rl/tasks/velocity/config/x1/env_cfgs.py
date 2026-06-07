@@ -301,12 +301,19 @@ def agibot_x1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   cfg.observations["critic"].enable_corruption = False
 
 
-  cfg.rewards["track_linear_velocity"].weight = 1.0
-  cfg.rewards["track_angular_velocity"].weight = 1.0
-  cfg.rewards["track_linear_velocity"].params["std"] = math.sqrt(0.16)
-  cfg.rewards["track_angular_velocity"].params["std"] = math.sqrt(0.1)
-  cfg.rewards["track_vel_hard"].params["sigma_v"] = 0.30
-  cfg.rewards["track_vel_hard"].weight = 0.80
+  # cfg.rewards["track_linear_velocity"].weight = 1.0
+  # cfg.rewards["track_angular_velocity"].weight = 1.0
+  # cfg.rewards["track_linear_velocity"].params["std"] = math.sqrt(0.16)
+  # cfg.rewards["track_angular_velocity"].params["std"] = math.sqrt(0.1)
+  # cfg.rewards["track_vel_hard"].params["sigma_v"] = 0.30
+  # cfg.rewards["track_vel_hard"].weight = 0.80
+  cfg.rewards["track_linear_velocity"] = None
+  cfg.rewards["track_angular_velocity"] = None
+  cfg.rewards["track_vel_hard"]  = None
+
+
+
+
   cfg.rewards["base_acc"] = RewardTermCfg(
     func=mdp.base_acc_l2,
     weight=-2.0,
@@ -374,7 +381,7 @@ def agibot_x1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   )
   cfg.rewards["hlip_holonomic_constraint"] = RewardTermCfg(
     func=mdp.holonomic_constraint,
-    weight=4.0,
+    weight=0.4,
     params={
       "command_name": "hlip_ref",
       "sigma_pose": math.sqrt(5.0 * 0.01),
@@ -382,7 +389,7 @@ def agibot_x1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   )
   cfg.rewards["hlip_holonomic_constraint_vel"] = RewardTermCfg(
     func=mdp.holonomic_constraint_vel,
-    weight=2.0,
+    weight=0.2,
     params={
       "command_name": "hlip_ref",
       "sigma_vel": math.sqrt(0.1),
