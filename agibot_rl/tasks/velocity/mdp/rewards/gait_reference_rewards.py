@@ -171,17 +171,40 @@ def clf_reward(
   if y_err.numel() > 0 and dy_err.numel() > 0:
     y_err_abs = torch.abs(y_err)
     dy_err_abs = torch.abs(dy_err)
-    env.extras["log"]["Metrics/hlip_clf/max_abs_y_err"] = torch.max(y_err_abs)
-    env.extras["log"]["Metrics/hlip_clf/max_abs_dy_err"] = torch.max(dy_err_abs)
-    y_err_dim_max = torch.max(y_err_abs, dim=0).values
-    dy_err_dim_max = torch.max(dy_err_abs, dim=0).values
-    env.extras["log"]["Metrics/hlip_clf/max_abs_y_err_dim"] = torch.argmax(y_err_dim_max)
-    env.extras["log"]["Metrics/hlip_clf/max_abs_dy_err_dim"] = torch.argmax(dy_err_dim_max)
+    dy_act = getattr(
+      command_term,
+      "dy_act",
+      torch.zeros(0, device=command_term.v.device),
+    )
+    dy_ref = getattr(
+      command_term,
+      "dy_out",
+      torch.zeros(0, device=command_term.v.device),
+    )
+    env.extras["log"]["Metrics/hlip_clf/mean_abs_y_err"] = torch.mean(y_err_abs)
+    env.extras["log"]["Metrics/hlip_clf/mean_abs_dy_err"] = torch.mean(dy_err_abs)
+    y_err_dim_mean = torch.mean(y_err_abs, dim=0)
+    dy_err_dim_mean = torch.mean(dy_err_abs, dim=0)
+    if dy_act.shape == dy_err.shape and dy_ref.shape == dy_err.shape:
+      dy_act_abs = torch.abs(dy_act)
+      dy_ref_abs = torch.abs(dy_ref)
+      dy_act_dim_mean = torch.mean(dy_act_abs, dim=0)
+      dy_ref_dim_mean = torch.mean(dy_ref_abs, dim=0)
+      env.extras["log"]["Metrics/hlip_clf/mean_abs_dy_act"] = torch.mean(dy_act_abs)
+      env.extras["log"]["Metrics/hlip_clf/mean_abs_dy_ref"] = torch.mean(dy_ref_abs)
+    else:
+      dy_act_dim_mean = None
+      dy_ref_dim_mean = None
+    env.extras["log"]["Metrics/hlip_clf/mean_abs_y_err_dim"] = torch.argmax(y_err_dim_mean)
+    env.extras["log"]["Metrics/hlip_clf/mean_abs_dy_err_dim"] = torch.argmax(dy_err_dim_mean)
     output_names = getattr(command_term, "output_names", ())
     if len(output_names) == y_err.shape[1]:
       for idx, name in enumerate(output_names):
-        env.extras["log"][f"Metrics/hlip_clf/y_err_max_by_dim/{name}"] = y_err_dim_max[idx]
-        env.extras["log"][f"Metrics/hlip_clf/dy_err_max_by_dim/{name}"] = dy_err_dim_max[idx]
+        env.extras["log"][f"Metrics/hlip_clf/y_err_mean_by_dim/{name}"] = y_err_dim_mean[idx]
+        env.extras["log"][f"Metrics/hlip_clf/dy_err_mean_by_dim/{name}"] = dy_err_dim_mean[idx]
+        if dy_act_dim_mean is not None and dy_ref_dim_mean is not None:
+          env.extras["log"][f"Metrics/hlip_clf/dy_act_mean_by_dim/{name}"] = dy_act_dim_mean[idx]
+          env.extras["log"][f"Metrics/hlip_clf/dy_ref_mean_by_dim/{name}"] = dy_ref_dim_mean[idx]
     env.extras["log"]["Metrics/hlip_clf/pelvis_yaw_err_abs_mean"] = torch.mean(
       y_err_abs[:, 5]
     )
