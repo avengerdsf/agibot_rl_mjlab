@@ -48,14 +48,14 @@ def foot_vel(
   env: ManagerBasedRlEnv, asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG
 ) -> torch.Tensor:
   asset: Entity = env.scene[asset_cfg.name]
-  return asset.data.site_lin_vel_w[:, asset_cfg.site_ids, :].flatten(start_dim=1)
+  return asset.data.body_lin_vel_w[:, asset_cfg.body_ids, :].flatten(start_dim=1)
 
 
 def foot_ang_vel(
   env: ManagerBasedRlEnv, asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG
 ) -> torch.Tensor:
   asset: Entity = env.scene[asset_cfg.name]
-  return asset.data.site_ang_vel_w[:, asset_cfg.site_ids, :].flatten(start_dim=1)
+  return asset.data.body_ang_vel_w[:, asset_cfg.body_ids, :].flatten(start_dim=1)
 
 
 def gait_reference_joint_pos_error(env: ManagerBasedRlEnv, command_name: str) -> torch.Tensor:
@@ -71,14 +71,30 @@ def gait_reference_joint_pos_error(env: ManagerBasedRlEnv, command_name: str) ->
   return asset.data.joint_pos[:, joint_ids] - command_term.ref_joint_pos
 
 
-def hlip_ref_traj(env: ManagerBasedRlEnv, command_name: str) -> torch.Tensor:
+def hlip_ref_traj(
+  env: ManagerBasedRlEnv,
+  command_name: str,
+  swing_z_scale: float = 1.0,
+) -> torch.Tensor:
   command_term = env.command_manager.get_term(command_name)
-  return command_term.y_out
+  traj = command_term.y_out
+  if swing_z_scale != 1.0:
+    traj = traj.clone()
+    traj[:, 8] *= swing_z_scale
+  return traj
 
 
-def hlip_act_traj(env: ManagerBasedRlEnv, command_name: str) -> torch.Tensor:
+def hlip_act_traj(
+  env: ManagerBasedRlEnv,
+  command_name: str,
+  swing_z_scale: float = 1.0,
+) -> torch.Tensor:
   command_term = env.command_manager.get_term(command_name)
-  return command_term.y_act
+  traj = command_term.y_act
+  if swing_z_scale != 1.0:
+    traj = traj.clone()
+    traj[:, 8] *= swing_z_scale
+  return traj
 
 
 def hlip_ref_traj_vel(env: ManagerBasedRlEnv, command_name: str) -> torch.Tensor:

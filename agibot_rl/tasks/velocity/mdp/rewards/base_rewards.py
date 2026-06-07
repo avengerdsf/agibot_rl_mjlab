@@ -516,7 +516,7 @@ def swing_foot_trajectory(
     )
 
   asset: Entity = env.scene[asset_cfg.name]
-  foot_pos_w = asset.data.site_pos_w[:, asset_cfg.site_ids, :]
+  foot_pos_w = asset.data.body_pos_w[:, asset_cfg.body_ids, :]
   root_pos_w = asset.data.root_link_pos_w.unsqueeze(1)
   root_quat_w = asset.data.root_link_quat_w.unsqueeze(1).expand(
     foot_pos_w.shape[0], foot_pos_w.shape[1], 4
@@ -538,7 +538,7 @@ def swing_foot_trajectory(
   env.extras["log"]["Metrics/swing_foot_trajectory_error"] = torch.sum(
     torch.sqrt(pos_error) * swing_mask
   ) / active_count
-  for idx, name in enumerate(command_term.foot_site_names):
+  for idx, name in enumerate(command_term.foot_body_names):
     env.extras["log"][f"Metrics/swing_foot_trajectory_error/{name}"] = torch.sum(
       torch.sqrt(pos_error[:, idx]) * swing_mask[:, idx]
     ) / torch.clamp(torch.sum(swing_mask[:, idx]), min=1.0)

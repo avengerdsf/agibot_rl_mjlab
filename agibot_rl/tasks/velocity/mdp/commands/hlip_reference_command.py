@@ -16,22 +16,38 @@ from mjlab.utils.lab_api.math import (
   wrap_to_pi,
 )
 
-HLIP_CLF_ERROR_SCALES = (
-  0.20, 0.60,
-  0.15, 0.50,
-  0.08, 0.30,
-  0.20, 1.00,
-  0.20, 1.00,
-  0.40, 1.00,
-  0.08, 0.80,
-  0.08, 0.80,
-  0.08, 0.80,
-  0.08, 0.80,
-  0.08, 0.80,
-  0.08, 0.80,
+HLIP_CLF_Q_WEIGHTS = (
+  25.0, 200.0,
+  300.0, 50.0,
+  400.0, 10.0,
+  420.0, 20.0,
+  200.0, 10.0,
+  300.0, 10.0,
+  1500.0, 125.0,
+  1700.0, 125.0,
+  3500.0, 100.0,
+  30.0, 1.0,
+  10.0, 1.0,
+  400.0, 10.0,
+  500.0, 10.0,
+  40.0, 1.0,
+  40.0, 1.0,
+  100.0, 1.0,
+  100.0, 1.0,
+  50.0, 1.0,
+  50.0, 1.0,
+  30.0, 1.0,
+  30.0, 1.0,
 )
-HLIP_CLF_Q_WEIGHTS = tuple(1.0 / (scale * scale) for scale in HLIP_CLF_ERROR_SCALES)
-HLIP_CLF_R_WEIGHTS = (1.0,) * 12
+HLIP_CLF_R_WEIGHTS = (
+  0.1, 0.1, 0.1,
+  0.05, 0.05, 0.05,
+  0.05, 0.05, 0.05,
+  0.02, 0.02, 0.02,
+  0.1, 0.01, 0.01,
+  0.01, 0.01, 0.01,
+  0.01, 0.01, 0.01,
+)
 
 
 # Bezier 曲线的位置公式 
@@ -320,27 +336,38 @@ class HLIPReferenceCommand(CommandTerm):
   def __init__(self, cfg: "HLIPReferenceCommandCfg", env):
     super().__init__(cfg, env)
     self.robot = env.scene[cfg.entity_name]
-    self.foot_site_ids, self.foot_site_names = self.robot.find_sites(cfg.foot_site_names)
-    self.foot_site_ids_tensor = torch.as_tensor(
-      self.foot_site_ids, device=self.device, dtype=torch.long
+    self.foot_body_ids, self.foot_body_names = self.robot.find_bodies(cfg.foot_body_names)
+    self.foot_body_ids_tensor = torch.as_tensor(
+      self.foot_body_ids, device=self.device, dtype=torch.long
     )
     self.ref_swing_foot_pos_b = torch.zeros(
-      self.num_envs, len(self.foot_site_names), 3, device=self.device
+      self.num_envs, len(self.foot_body_names), 3, device=self.device
     )
     self.swing_foot_phase = torch.zeros(
-      self.num_envs, len(self.foot_site_names), device=self.device
+      self.num_envs, len(self.foot_body_names), device=self.device
     )
     self.swing_foot_mask = torch.zeros(
-      self.num_envs, len(self.foot_site_names), device=self.device, dtype=torch.bool
+      self.num_envs, len(self.foot_body_names), device=self.device, dtype=torch.bool
     )
     self.hlip_x_init = torch.zeros(self.num_envs, 2, device=self.device)
     self.hlip_y_init = torch.zeros(self.num_envs, 2, 2, device=self.device)
+    self.upper_body_joint_ids, self.upper_body_joint_names = self.robot.find_joints(
+      cfg.upper_body_joint_names
+    )
+    if len(self.upper_body_joint_ids) != 9:
+      raise ValueError(
+        "HLIP upper-body reference expects 9 joints in target-project order, "
+        f"got {len(self.upper_body_joint_ids)}: {self.upper_body_joint_names}."
+      )
+    self.upper_body_joint_ids_tensor = torch.as_tensor(
+      self.upper_body_joint_ids, device=self.device, dtype=torch.long
+    )
     self.prev_swing_foot_mask = torch.zeros_like(self.swing_foot_mask)
     self.prev_foot_contact = torch.zeros_like(self.swing_foot_mask)
     self.swing_start_foot_pos_b = self._current_foot_pos_b()
     self.swing_start_foot_pos_l = self._current_foot_pos_b()
     self.step_target_delta_xy = torch.zeros(
-      self.num_envs, len(self.foot_site_names), 2, device=self.device
+      self.num_envs, len(self.foot_body_names), 2, device=self.device
     )
     self.last_landing_actual_xy = torch.zeros(self.num_envs, 2, device=self.device)
     self.last_landing_target_xy = torch.zeros_like(self.last_landing_actual_xy)
@@ -368,12 +395,8 @@ class HLIPReferenceCommand(CommandTerm):
     )
     self.ref_joint_pos = torch.zeros(self.num_envs, 0, device=self.device)
     self.ref_joint_ids_tensor = torch.empty(0, device=self.device, dtype=torch.long)
-    # self.n_outputs
-    # COM xyz                 0,1,2
-    # pelvis rpy              3,4,5
-    # swing foot xyz          6,7,8
-    # swing foot rpy          9,10,11
-    self.n_outputs = 6 + 3 * len(self.foot_site_names)
+    # COM xyz, pelvis rpy, swing foot xyz/rpy, then target-project upper-body joints.
+    self.n_outputs = 6 + 3 * len(self.foot_body_names) + len(self.upper_body_joint_ids)
     self.y_out = torch.zeros(self.num_envs, self.n_outputs, device=self.device)
     self.y_act = torch.zeros_like(self.y_out)
     self.dy_out = torch.zeros_like(self.y_out)
@@ -430,14 +453,11 @@ class HLIPReferenceCommand(CommandTerm):
   def _update_command(self) -> None:
     self._update_reference()
 
-  def _phase_command(self):
-    return self._env.command_manager.get_term(self.cfg.phase_command_name)
-
   def _current_foot_pos_w(self) -> torch.Tensor:
-    return self.robot.data.site_pos_w[:, self.foot_site_ids_tensor, :]
+    return self.robot.data.body_pos_w[:, self.foot_body_ids_tensor, :]
 
   def _current_foot_quat_w(self) -> torch.Tensor:
-    return self.robot.data.site_quat_w[:, self.foot_site_ids_tensor, :]
+    return self.robot.data.body_quat_w[:, self.foot_body_ids_tensor, :]
 
   def _quat_to_rpy(self, quat: torch.Tensor) -> torch.Tensor:
     roll, pitch, yaw = euler_xyz_from_quat(quat)
@@ -446,14 +466,14 @@ class HLIPReferenceCommand(CommandTerm):
   def _current_foot_rpy(self) -> torch.Tensor:
     foot_quat_w = self._current_foot_quat_w()
     return self._quat_to_rpy(foot_quat_w.reshape(-1, 4)).reshape(
-      self.num_envs, len(self.foot_site_names), 3
+      self.num_envs, len(self.foot_body_names), 3
     )
 
   def _current_foot_contact(self) -> torch.Tensor:
     sensor = self._env.scene[self.cfg.contact_sensor_name]
     assert sensor.data.found is not None
     contact = sensor.data.found > 0
-    num_feet = len(self.foot_site_names)
+    num_feet = len(self.foot_body_names)
     if contact.shape[1] == num_feet:
       return contact
     if contact.shape[1] % num_feet != 0:
@@ -464,6 +484,11 @@ class HLIPReferenceCommand(CommandTerm):
     geoms_per_foot = contact.shape[1] // num_feet
     return contact.reshape(contact.shape[0], num_feet, geoms_per_foot).any(dim=-1)
 
+  def get_not_flight_envs(self) -> torch.Tensor:
+    contact = self._current_foot_contact()
+    env_ids = torch.arange(self.num_envs, device=self.device)
+    return contact[env_ids, self.stance_idx].float()
+
   def _current_foot_pos_b(self) -> torch.Tensor:
     foot_pos_w = self._current_foot_pos_w()
     root_pos_w = self.robot.data.root_link_pos_w.unsqueeze(1)
@@ -473,7 +498,7 @@ class HLIPReferenceCommand(CommandTerm):
     return quat_apply_inverse(
       root_quat_w.reshape(-1, 4),
       (foot_pos_w - root_pos_w).reshape(-1, 3),
-    ).reshape(self.num_envs, len(self.foot_site_names), 3)
+    ).reshape(self.num_envs, len(self.foot_body_names), 3)
 
   def _current_foot_pos_l(self) -> torch.Tensor:
     foot_pos_w = self._current_foot_pos_w()
@@ -483,35 +508,35 @@ class HLIPReferenceCommand(CommandTerm):
     return quat_apply_inverse(
       stance_quat.reshape(-1, 4),
       (foot_pos_w - self.stance_foot_pos_0.unsqueeze(1)).reshape(-1, 3),
-    ).reshape(self.num_envs, len(self.foot_site_names), 3)
+    ).reshape(self.num_envs, len(self.foot_body_names), 3)
 
   def _current_foot_vel_b(self) -> torch.Tensor:
-    foot_vel_w = self.robot.data.site_lin_vel_w[:, self.foot_site_ids_tensor, :]
+    foot_vel_w = self.robot.data.body_lin_vel_w[:, self.foot_body_ids_tensor, :]
     root_quat_w = self.robot.data.root_link_quat_w.unsqueeze(1).expand(
       foot_vel_w.shape[0], foot_vel_w.shape[1], 4
     )
     return quat_apply_inverse(
       root_quat_w.reshape(-1, 4),
       foot_vel_w.reshape(-1, 3),
-    ).reshape(self.num_envs, len(self.foot_site_names), 3)
+    ).reshape(self.num_envs, len(self.foot_body_names), 3)
 
   def _current_foot_vel_l(self) -> torch.Tensor:
-    foot_vel_w = self.robot.data.site_lin_vel_w[:, self.foot_site_ids_tensor, :]
+    foot_vel_w = self.robot.data.body_lin_vel_w[:, self.foot_body_ids_tensor, :]
     stance_quat = self.stance_foot_ori_quat_0.unsqueeze(1).expand(
       foot_vel_w.shape[0], foot_vel_w.shape[1], 4
     )
     return quat_apply_inverse(
       stance_quat.reshape(-1, 4),
       foot_vel_w.reshape(-1, 3),
-    ).reshape(self.num_envs, len(self.foot_site_names), 3)
+    ).reshape(self.num_envs, len(self.foot_body_names), 3)
 
   def _current_foot_ang_vel_local(self) -> torch.Tensor:
-    foot_ang_vel_w = self.robot.data.site_ang_vel_w[:, self.foot_site_ids_tensor, :]
+    foot_ang_vel_w = self.robot.data.body_ang_vel_w[:, self.foot_body_ids_tensor, :]
     foot_quat_w = self._current_foot_quat_w()
     return quat_apply(
       quat_inv(foot_quat_w.reshape(-1, 4)),
       foot_ang_vel_w.reshape(-1, 3),
-    ).reshape(self.num_envs, len(self.foot_site_names), 3)
+    ).reshape(self.num_envs, len(self.foot_body_names), 3)
 
   def _current_pelvis_rpy(self) -> torch.Tensor:
     roll, pitch, yaw = euler_xyz_from_quat(self.robot.data.root_link_quat_w)
@@ -544,12 +569,29 @@ class HLIPReferenceCommand(CommandTerm):
     env_ids = torch.arange(self.num_envs, device=self.device)
     foot_pos_w = self._current_foot_pos_w()
     foot_rpy = self._current_foot_rpy()
-    foot_vel_w = self.robot.data.site_lin_vel_w[:, self.foot_site_ids_tensor, :]
-    foot_ang_vel_w = self.robot.data.site_ang_vel_w[:, self.foot_site_ids_tensor, :]
+    foot_vel_w = self.robot.data.body_lin_vel_w[:, self.foot_body_ids_tensor, :]
+    foot_ang_vel_w = self.robot.data.body_ang_vel_w[:, self.foot_body_ids_tensor, :]
     self.stance_foot_pos = foot_pos_w[env_ids, self.stance_idx, :]
     self.stance_foot_ori = foot_rpy[env_ids, self.stance_idx, :]
     self.stance_foot_vel = foot_vel_w[env_ids, self.stance_idx, :]
     self.stance_foot_ang_vel = foot_ang_vel_w[env_ids, self.stance_idx, :]
+
+  def _update_phase_state(self) -> None:
+    elapsed = self._env.episode_length_buf.to(self.device) * self._env.step_dt
+    self.phase = (elapsed / self.cfg.reference_period) % 1.0
+    first_half = self.phase < 0.5
+    self.stance_idx = torch.where(
+      first_half,
+      torch.zeros_like(self.stance_idx),
+      torch.ones_like(self.stance_idx),
+    )
+    self.swing_idx = 1 - self.stance_idx
+    self.phase_var = torch.where(
+      first_half,
+      2.0 * self.phase,
+      2.0 * self.phase - 1.0,
+    )
+    self.cur_swing_time = self.phase_var * (0.5 * self.cfg.reference_period)
 
   def _pelvis_reference(
     self,
@@ -577,6 +619,70 @@ class HLIPReferenceCommand(CommandTerm):
     eul_dot[:, 2] = command[:, 2]
     return pelvis_rpy_ref, _euler_rates_to_omega(pelvis_rpy_ref, eul_dot)
 
+  def _upper_body_reference(
+    self,
+    command: torch.Tensor,
+  ) -> tuple[torch.Tensor, torch.Tensor]:
+    forward_vel = command[:, 0]
+    phase = 2.0 * torch.pi * self.phase
+    sh_pitch0, sh_roll0, sh_yaw0 = self.cfg.shoulder_ref
+    elb0 = self.cfg.elbow_ref
+    waist_yaw0 = self.cfg.waist_yaw_ref
+    amp = torch.stack(
+      (
+        waist_yaw0 * torch.ones_like(forward_vel),
+        sh_pitch0 * forward_vel,
+        sh_pitch0 * forward_vel,
+        sh_roll0 * torch.ones_like(forward_vel),
+        sh_roll0 * torch.ones_like(forward_vel),
+        sh_yaw0 * torch.ones_like(forward_vel),
+        sh_yaw0 * torch.ones_like(forward_vel),
+        elb0 * forward_vel,
+        elb0 * forward_vel,
+      ),
+      dim=1,
+    )
+    sign = torch.tensor(
+      (1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0),
+      device=self.device,
+      dtype=amp.dtype,
+    )
+    offset = torch.tensor(
+      (
+        torch.pi,
+        torch.pi / 2.0,
+        torch.pi / 2.0,
+        torch.pi / 2.0,
+        torch.pi / 2.0,
+        0.0,
+        0.0,
+        torch.pi / 2.0,
+        torch.pi / 2.0,
+      ),
+      device=self.device,
+      dtype=amp.dtype,
+    )
+    default_joint_pos = self.robot.data.default_joint_pos[
+      :, self.upper_body_joint_ids_tensor
+    ]
+    ref = (
+      amp
+      * sign.unsqueeze(0)
+      * torch.sin(phase.unsqueeze(1) + offset.unsqueeze(0))
+      + default_joint_pos
+    )
+    dphase_dt = 2.0 * torch.pi / torch.clamp(
+      torch.full_like(forward_vel, self.cfg.reference_period),
+      min=1e-6,
+    )
+    ref_dot = (
+      amp
+      * sign.unsqueeze(0)
+      * torch.cos(phase.unsqueeze(1) + offset.unsqueeze(0))
+      * dphase_dt.unsqueeze(1)
+    )
+    return ref, ref_dot
+
   def _update_clf_state(
     self,
     command: torch.Tensor,
@@ -587,6 +693,8 @@ class HLIPReferenceCommand(CommandTerm):
     ref_foot_vel_l: torch.Tensor,
     ref_swing_foot_rpy: torch.Tensor,
     ref_swing_foot_ang_vel: torch.Tensor,
+    ref_upper_body_joint_pos: torch.Tensor,
+    ref_upper_body_joint_vel: torch.Tensor,
   ) -> None:
     foot_pos_l = self._current_foot_pos_l()
     foot_vel_l = self._current_foot_vel_l()
@@ -654,19 +762,43 @@ class HLIPReferenceCommand(CommandTerm):
     root_ref_vel[:, 1] = sin_yaw * root_ref_vel_xy[:, 0] + cos_yaw * root_ref_vel_xy[:, 1]
 
     self.y_out = torch.cat(
-      (root_ref, pelvis_rpy_ref, ref_foot_pos_l, ref_swing_foot_rpy),
+      (
+        root_ref,
+        pelvis_rpy_ref,
+        ref_foot_pos_l,
+        ref_swing_foot_rpy,
+        ref_upper_body_joint_pos,
+      ),
       dim=1,
     )
     self.y_act = torch.cat(
-      (com_pos_l, pelvis_rpy, swing_foot_pos_l, swing_foot_rpy),
+      (
+        com_pos_l,
+        pelvis_rpy,
+        swing_foot_pos_l,
+        swing_foot_rpy,
+        self.robot.data.joint_pos[:, self.upper_body_joint_ids_tensor],
+      ),
       dim=1,
     )
     self.dy_out = torch.cat(
-      (root_ref_vel, pelvis_rpy_rate_ref, ref_foot_vel_l, ref_swing_foot_ang_vel),
+      (
+        root_ref_vel,
+        pelvis_rpy_rate_ref,
+        ref_foot_vel_l,
+        ref_swing_foot_ang_vel,
+        ref_upper_body_joint_vel,
+      ),
       dim=1,
     )
     self.dy_act = torch.cat(
-      (com_vel_l, self.robot.data.root_link_ang_vel_b, swing_foot_vel_l, swing_foot_ang_vel),
+      (
+        com_vel_l,
+        self.robot.data.root_link_ang_vel_b,
+        swing_foot_vel_l,
+        swing_foot_ang_vel,
+        self.robot.data.joint_vel[:, self.upper_body_joint_ids_tensor],
+      ),
       dim=1,
     )
     self.vdot, self.v = self.clf.compute_vdot(
@@ -693,12 +825,7 @@ class HLIPReferenceCommand(CommandTerm):
     command = self._env.command_manager.get_command(self.cfg.velocity_command_name)
     foot_pos_b = self._current_foot_pos_b()
     foot_pos_l = self._current_foot_pos_l()
-    phase_command = self._phase_command()
-    self.phase = phase_command.phase
-    self.phase_var = phase_command.phase_var
-    self.cur_swing_time = phase_command.cur_swing_time
-    self.stance_idx = phase_command.stance_idx
-    self.swing_idx = phase_command.swing_idx
+    self._update_phase_state()
     moving = torch.linalg.norm(command, dim=1) > self.cfg.reference_command_threshold
     left_swing = (self.swing_idx == 0) & moving
     right_swing = (self.swing_idx == 1) & moving
@@ -799,7 +926,7 @@ class HLIPReferenceCommand(CommandTerm):
     ).unsqueeze(0).expand(self.num_envs, -1)
     horizontal = torch.zeros_like(swing_phase)
     horizontal_dot = torch.zeros_like(swing_phase)
-    for foot_idx in range(len(self.foot_site_names)):
+    for foot_idx in range(len(self.foot_body_names)):
       horizontal[:, foot_idx] = _bezier_deg(
         swing_phase[:, foot_idx],
         horizontal_control,
@@ -831,7 +958,7 @@ class HLIPReferenceCommand(CommandTerm):
     z_max = torch.maximum(z_init, z_land) + self.cfg.swing_clearance
     z_ref = torch.zeros_like(z_init)
     z_ref_dot = torch.zeros_like(z_init)
-    for foot_idx in range(len(self.foot_site_names)):
+    for foot_idx in range(len(self.foot_body_names)):
       control = torch.stack(
         (
           z_init[:, foot_idx],
@@ -855,18 +982,18 @@ class HLIPReferenceCommand(CommandTerm):
     ref_pos_l = torch.stack((x_ref_l, y_ref_l, z_ref), dim=-1)
     ref_vel_l = torch.stack((x_ref_l_dot, y_ref_l_dot, z_ref_dot), dim=-1)
     stance_quat = self.stance_foot_ori_quat_0.unsqueeze(1).expand(
-      self.num_envs, len(self.foot_site_names), 4
+      self.num_envs, len(self.foot_body_names), 4
     )
     ref_pos_w = self.stance_foot_pos_0.unsqueeze(1) + quat_apply(
       stance_quat.reshape(-1, 4),
       ref_pos_l.reshape(-1, 3),
-    ).reshape(self.num_envs, len(self.foot_site_names), 3)
+    ).reshape(self.num_envs, len(self.foot_body_names), 3)
     root_quat = self.robot.data.root_link_quat_w.unsqueeze(1).expand_as(stance_quat)
     root_pos = self.robot.data.root_link_pos_w.unsqueeze(1)
     ref_pos_b = quat_apply_inverse(
       root_quat.reshape(-1, 4),
       (ref_pos_w - root_pos).reshape(-1, 3),
-    ).reshape(self.num_envs, len(self.foot_site_names), 3)
+    ).reshape(self.num_envs, len(self.foot_body_names), 3)
     self.ref_swing_foot_pos_b = torch.where(
       swing_mask.unsqueeze(-1),
       ref_pos_b,
@@ -899,6 +1026,7 @@ class HLIPReferenceCommand(CommandTerm):
     ref_swing_foot_rpy[:, 2] = pelvis_rpy_ref[:, 2]
     ref_swing_foot_ang_vel = torch.zeros_like(ref_swing_foot_rpy)
     ref_swing_foot_ang_vel[:, 2] = pelvis_rpy_rate_ref[:, 2]
+    ref_upper_body_joint_pos, ref_upper_body_joint_vel = self._upper_body_reference(command)
     self._update_clf_state(
       command,
       self.phase,
@@ -908,6 +1036,8 @@ class HLIPReferenceCommand(CommandTerm):
       ref_swing_foot_vel_l,
       ref_swing_foot_rpy,
       ref_swing_foot_ang_vel,
+      ref_upper_body_joint_pos,
+      ref_upper_body_joint_vel,
     )
     self.swing_foot_phase = swing_phase
     self.swing_foot_mask = swing_mask
@@ -919,11 +1049,10 @@ class HLIPReferenceCommand(CommandTerm):
 class HLIPReferenceCommandCfg(CommandTermCfg):
   entity_name: str
   velocity_command_name: str = "twist"
-  phase_command_name: str = "gait_phase"
   contact_sensor_name: str = "feet_ground_contact"
   reference_period: float = 0.7
   reference_command_threshold: float = 0.1
-  foot_site_names: tuple[str, ...]
+  foot_body_names: tuple[str, ...]
   swing_clearance: float = 0.12
   swing_step_x_min: float = -0.20
   swing_step_x_max: float = 0.35
@@ -931,6 +1060,20 @@ class HLIPReferenceCommandCfg(CommandTermCfg):
   hlip_com_height: float = 0.61
   hlip_double_support_time: float = 0.1
   hlip_step_width: float = 0.26
+  upper_body_joint_names: tuple[str, ...] = (
+    "lumbar_yaw_.*",
+    "left_shoulder_pitch_.*",
+    "right_shoulder_pitch_.*",
+    "left_shoulder_roll_.*",
+    "right_shoulder_roll_.*",
+    "left_shoulder_yaw_.*",
+    "right_shoulder_yaw_.*",
+    "left_elbow_pitch_.*",
+    "right_elbow_pitch_.*",
+  )
+  shoulder_ref: tuple[float, float, float] = (0.16, 0.0, 0.0)
+  elbow_ref: float = 0.1
+  waist_yaw_ref: float = 0.0
   q_weights: tuple[float, ...] = HLIP_CLF_Q_WEIGHTS
   r_weights: tuple[float, ...] = HLIP_CLF_R_WEIGHTS
   yaw_idx: tuple[int, ...] = (5, 11)

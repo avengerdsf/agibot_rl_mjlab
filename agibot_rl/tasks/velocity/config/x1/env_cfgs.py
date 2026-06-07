@@ -38,6 +38,7 @@ X1_FOOT_COLLISION_GEOMS = (
   "right_foot_7_collision",
 )
 X1_FOOT_SITES = ("left_foot", "right_foot")
+X1_FOOT_BODIES = ("link_left_ankle_roll", "link_right_ankle_roll")
 
 def stacked_term_obs(
     env,
@@ -206,10 +207,9 @@ def agibot_x1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     entity_name="robot",
     resampling_time_range=(1e9, 1e9),
     velocity_command_name="twist",
-    phase_command_name="gait_phase",
     reference_period=0.7,
     reference_command_threshold=0.1,
-    foot_site_names=X1_FOOT_SITES,
+    foot_body_names=X1_FOOT_BODIES,
     swing_clearance=0.12,
     swing_step_x_min=-0.25,
     swing_step_x_max=0.50,
@@ -236,6 +236,13 @@ def agibot_x1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       preserve_order=True,
     )
 
+  def foot_body_cfg() -> SceneEntityCfg:
+    return SceneEntityCfg(
+      "robot",
+      body_names=X1_FOOT_BODIES,
+      preserve_order=True,
+    )
+
   foot_geom_cfg = SceneEntityCfg(
     "robot",
     geom_names=X1_FOOT_COLLISION_GEOMS,
@@ -248,11 +255,11 @@ def agibot_x1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   cfg.observations["critic"].terms.pop("gait_reference_joint_pos_error", None)
   cfg.observations["critic"].terms["hlip_ref_traj"] = ObservationTermCfg(
     func=mdp.hlip_ref_traj,
-    params={"command_name": "hlip_ref"},
+    params={"command_name": "hlip_ref", "swing_z_scale": 25.0},
   )
   cfg.observations["critic"].terms["hlip_act_traj"] = ObservationTermCfg(
     func=mdp.hlip_act_traj,
-    params={"command_name": "hlip_ref"},
+    params={"command_name": "hlip_ref", "swing_z_scale": 25.0},
   )
   cfg.observations["critic"].terms["hlip_ref_traj_vel"] = ObservationTermCfg(
     func=mdp.hlip_ref_traj_vel,
@@ -266,11 +273,11 @@ def agibot_x1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   )
   cfg.observations["critic"].terms["foot_vel"] = ObservationTermCfg(
     func=mdp.foot_vel,
-    params={"asset_cfg": foot_site_cfg()},
+    params={"asset_cfg": foot_body_cfg()},
   )
   cfg.observations["critic"].terms["foot_ang_vel"] = ObservationTermCfg(
     func=mdp.foot_ang_vel,
-    params={"asset_cfg": foot_site_cfg()},
+    params={"asset_cfg": foot_body_cfg()},
   )
 
   obs_history_length = 8
@@ -296,9 +303,8 @@ def agibot_x1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
 
   cfg.rewards["track_linear_velocity"].weight = 1.0
   cfg.rewards["track_angular_velocity"].weight = 1.0
-  cfg.rewards["track_linear_velocity"].params["std"] = math.sqrt(0.1)
-  cfg.rewards["track_angular_velocity"].params["std"] = math.sqrt(0.1)
   cfg.rewards["track_linear_velocity"].params["std"] = math.sqrt(0.16)
+  cfg.rewards["track_angular_velocity"].params["std"] = math.sqrt(0.1)
   cfg.rewards["track_vel_hard"].params["sigma_v"] = 0.30
   cfg.rewards["track_vel_hard"].weight = 0.80
   cfg.rewards["base_acc"] = RewardTermCfg(
@@ -345,15 +351,15 @@ def agibot_x1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       "command_name": "hlip_ref",
       "std": 0.08,
       "command_threshold": 0.1,
-      "asset_cfg": foot_site_cfg(),
+      "asset_cfg": foot_body_cfg(),
     },
   )
   cfg.rewards["hlip_clf_reward"] = RewardTermCfg(
     func=mdp.clf_reward,
-    weight=3.0,
+    weight=10.0,
     params={
       "command_name": "hlip_ref",
-      "max_eta_err": 0.5,
+      "max_eta_err": 0.25,
     },
   )
   cfg.rewards["hlip_clf_decreasing_condition"] = RewardTermCfg(
@@ -362,13 +368,13 @@ def agibot_x1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     params={
       "command_name": "hlip_ref",
       "alpha": 0.5,
-      "eta_max": 0.5,
-      "eta_dot_max": 1.0,
+      "eta_max": 0.2,
+      "eta_dot_max": 0.3,
     },
   )
   cfg.rewards["hlip_holonomic_constraint"] = RewardTermCfg(
     func=mdp.holonomic_constraint,
-    weight=0.4,
+    weight=4.0,
     params={
       "command_name": "hlip_ref",
       "sigma_pose": math.sqrt(5.0 * 0.01),
@@ -376,7 +382,7 @@ def agibot_x1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   )
   cfg.rewards["hlip_holonomic_constraint_vel"] = RewardTermCfg(
     func=mdp.holonomic_constraint_vel,
-    weight=0.4,
+    weight=2.0,
     params={
       "command_name": "hlip_ref",
       "sigma_vel": math.sqrt(0.1),
@@ -529,28 +535,7 @@ def agibot_x1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   #   r".*_shoulder_.*": 0.25,
   #   r".*_elbow_.*": 0.2,
   # }
-  cfg.rewards["pose"].params["asset_cfg"] = SceneEntityCfg(
-    "robot",
-    joint_names=(
-      "lumbar_yaw_.*",
-      "left_shoulder_pitch_.*",
-      "right_shoulder_pitch_.*",
-      "left_shoulder_roll_.*",
-      "right_shoulder_roll_.*",
-      ".*_elbow_pitch_.*",
-    ),
-  )
-  cfg.rewards["pose"].params["std_standing"] = {".*": 0.1}
-  cfg.rewards["pose"].params["std_walking"] = {
-    r"lumbar_yaw_.*": 0.15,
-    r".*_shoulder_.*": 0.2,
-    r".*_elbow_.*": 0.1,
-  }
-  cfg.rewards["pose"].params["std_running"] = {
-    r"lumbar_yaw_.*": 0.15,
-    r".*_shoulder_.*": 0.25,
-    r".*_elbow_.*": 0.2,
-  }
+  cfg.rewards["pose"] = None
   cfg.rewards["x1_joint_default_pos"] = None
   cfg.rewards["x1_joint_vel_l2"] = None
   fixed_joint_names = (

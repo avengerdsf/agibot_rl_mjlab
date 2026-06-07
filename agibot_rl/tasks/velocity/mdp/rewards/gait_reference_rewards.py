@@ -236,7 +236,7 @@ def holonomic_constraint(
   env.extras["log"]["Metrics/hlip_holonomic/pose_error"] = torch.mean(
     torch.sqrt(error_norm)
   )
-  return torch.exp(-error_norm / sigma_pose**2)
+  return command_term.get_not_flight_envs() * torch.exp(-error_norm / sigma_pose**2)
 
 
 def holonomic_constraint_vel(
@@ -252,4 +252,4 @@ def holonomic_constraint_vel(
   env.extras["log"]["Metrics/hlip_holonomic/vel_error"] = torch.mean(
     torch.sqrt(error_norm)
   )
-  return torch.exp(-error_norm / sigma_vel**2)
+  return command_term.get_not_flight_envs() * torch.exp(-error_norm / sigma_vel**2)
