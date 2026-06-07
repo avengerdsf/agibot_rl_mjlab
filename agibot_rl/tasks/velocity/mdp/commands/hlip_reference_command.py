@@ -14,6 +14,7 @@ from mjlab.utils.lab_api.math import (
   quat_apply_inverse,
   quat_inv,
   wrap_to_pi,
+  yaw_quat,
 )
 
 HLIP_CLF_Q_WEIGHTS = (
@@ -724,12 +725,13 @@ class HLIPReferenceCommand(CommandTerm):
       torch.arange(self.num_envs, device=self.device),
       swing_indices,
     ]
+    stance_yaw_quat_0 = yaw_quat(self.stance_foot_ori_quat_0)
     com_pos_l = quat_apply_inverse(
-      self.stance_foot_ori_quat_0,
+      stance_yaw_quat_0,
       self.robot.data.root_com_pos_w - self.stance_foot_pos_0,
     )
     com_vel_l = quat_apply_inverse(
-      self.stance_foot_ori_quat_0,
+      stance_yaw_quat_0,
       self.robot.data.root_com_vel_w[:, 0:3],
     )
     stance_yaw_0 = self.stance_foot_ori_0[:, 2]
