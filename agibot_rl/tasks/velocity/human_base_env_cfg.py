@@ -36,7 +36,7 @@ from mjlab.utils.nan_guard import NanGuardCfg
 
 import agibot_rl.tasks.velocity.mdp as mdp
 
-POLICY_JOINTS_NAMES=[
+POLICY_JOINTS_NAMES=(
   "lumbar_yaw_.*",
   # "lumbar_pitch_.*",
   # "lumbar_roll_.*",
@@ -54,7 +54,7 @@ POLICY_JOINTS_NAMES=[
   ".*_knee_pitch_.*",
   ".*_ankle_pitch_.*",
   ".*_ankle_roll_.*"
-]
+)
 
 
 
