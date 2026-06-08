@@ -304,32 +304,47 @@ class _HLIPFootPlacement:
       command_b.shape[0], -1, -1
     )
     # 求 x 方向 HLIP 周期轨道的初始状态：
-    x_init = torch.linalg.solve(
+    x_raw = torch.linalg.solve(
       eye - self.A_s2s,
       self.B_s2s.view(1, 2, 1) * step_x.view(-1, 1, 1),
     ).squeeze(-1)
+    x_init = torch.stack((x_raw[:, 0] - step_x, x_raw[:, 1]), dim=1)
 
-    # 求步宽
-    step_y_left = command_b[:, 1] * self.step_time + self.step_width
-    step_y_right = command_b[:, 1] * self.step_time - self.step_width
+    step_y_stance_left = command_b[:, 1] * self.step_time - self.step_width
+    step_y_stance_right = command_b[:, 1] * self.step_time + self.step_width
     # 两步转移矩阵
     A_squared = self.A_s2s @ self.A_s2s
     # 输入的一步转移矩阵
     B_term = self.A_s2s @ self.B_s2s
     # 求解轨道的初始状态，也就是经过两步传播回到相同的状态
-    y_left = torch.linalg.solve(
+    y_left_raw = torch.linalg.solve(
       eye - A_squared,
-      B_term.view(1, 2, 1) * step_y_left.view(-1, 1, 1)
-      + self.B_s2s.view(1, 2, 1) * step_y_right.view(-1, 1, 1),
+      B_term.view(1, 2, 1) * step_y_stance_left.view(-1, 1, 1)
+      + self.B_s2s.view(1, 2, 1) * step_y_stance_right.view(-1, 1, 1),
     ).squeeze(-1)
-    y_right = torch.linalg.solve(
+    y_right_raw = torch.linalg.solve(
       eye - A_squared,
-      B_term.view(1, 2, 1) * step_y_right.view(-1, 1, 1)
-      + self.B_s2s.view(1, 2, 1) * step_y_left.view(-1, 1, 1),
+      B_term.view(1, 2, 1) * step_y_stance_right.view(-1, 1, 1)
+      + self.B_s2s.view(1, 2, 1) * step_y_stance_left.view(-1, 1, 1),
     ).squeeze(-1)
-    return x_init, torch.stack((y_left, y_right), dim=1), step_x, torch.stack(
-      (step_y_left, step_y_right), dim=1
+    y_init = torch.stack(
+      (
+        torch.stack(
+          (y_right_raw[:, 0] - step_y_stance_right, y_right_raw[:, 1]),
+          dim=1,
+        ),
+        torch.stack(
+          (y_left_raw[:, 0] - step_y_stance_left, y_left_raw[:, 1]),
+          dim=1,
+        ),
+      ),
+      dim=1,
     )
+    step_y_by_foot = torch.stack(
+      (step_y_stance_right, step_y_stance_left),
+      dim=1,
+    )
+    return x_init, y_init, step_x, step_y_by_foot
 
   def compute_com_trajectory(
     self,
@@ -846,11 +861,10 @@ class HLIPReferenceCommand(CommandTerm):
 
     cur_step_time = self.cur_swing_time
     x_ref, x_ref_dot = self.hlip.compute_com_trajectory(cur_step_time, self.hlip_x_init)
-    y_state = torch.where(
-      left_swing.unsqueeze(1),
-      self.hlip_y_init[:, 0, :],
-      self.hlip_y_init[:, 1, :],
-    )
+    y_state = self.hlip_y_init[
+      torch.arange(self.num_envs, device=self.device),
+      self.stance_idx,
+    ]
     y_ref, y_ref_dot = self.hlip.compute_com_trajectory(cur_step_time, y_state)
     root_ref = torch.stack((x_ref, y_ref, root_height), dim=1)
     root_ref_vel = torch.stack(
