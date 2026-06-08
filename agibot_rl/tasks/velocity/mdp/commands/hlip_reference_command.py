@@ -13,7 +13,6 @@ from mjlab.utils.lab_api.math import (
   quat_apply,
   quat_apply_inverse,
   wrap_to_pi,
-  yaw_quat,
 )
 
 HLIP_CLF_Q_WEIGHTS = (
@@ -132,24 +131,6 @@ def _euler_rates_to_omega(eul: torch.Tensor, eul_rates: torch.Tensor) -> torch.T
     dim=-2,
   )# [B,3,3]
   return torch.einsum("bij,bj->bi", matrix, eul_rates)
-
-
-def _quat_conjugate(quat: torch.Tensor) -> torch.Tensor:
-  return torch.cat((quat[..., :1], -quat[..., 1:]), dim=-1)
-
-
-def _quat_mul(lhs: torch.Tensor, rhs: torch.Tensor) -> torch.Tensor:
-  lw, lx, ly, lz = lhs.unbind(-1)
-  rw, rx, ry, rz = rhs.unbind(-1)
-  return torch.stack(
-    (
-      lw * rw - lx * rx - ly * ry - lz * rz,
-      lw * rx + lx * rw + ly * rz - lz * ry,
-      lw * ry - lx * rz + ly * rw + lz * rx,
-      lw * rz + lx * ry - ly * rx + lz * rw,
-    ),
-    dim=-1,
-  )
 
 
 class _ContinuousTimeClf:
@@ -420,7 +401,10 @@ class HLIPReferenceCommand(CommandTerm):
     self.upper_body_joint_ids_tensor = torch.as_tensor(
       self.upper_body_joint_ids, device=self.device, dtype=torch.long
     )
-    self.foot_heading_axis_b = torch.tensor((0.0, 0.0, 1.0), device=self.device)
+    self.foot_hlip_side_sign = self._foot_hlip_side_sign(
+      self.foot_body_names,
+      self.device,
+    )
     self.prev_swing_foot_mask = torch.zeros_like(self.swing_foot_mask)
     self.prev_foot_contact = torch.zeros_like(self.swing_foot_mask)
     self.swing_start_foot_pos_b = self._current_foot_pos_b()
@@ -439,13 +423,13 @@ class HLIPReferenceCommand(CommandTerm):
     self.prev_pelvis_rpy = self.pelvis_rpy.clone()
     self.pelvis_rpy_rate = torch.zeros_like(self.pelvis_rpy)
     foot_pos_w = self._current_foot_pos_w()
-    foot_quat_w = self._current_foot_quat_w()
-    self.foot_rpy = self._foot_quat_to_rpy(foot_quat_w)
+    foot_frame_w = self._current_foot_hlip_frame_w()
+    self.foot_rpy = self._frame_to_rpy(foot_frame_w)
     self.prev_foot_rpy = self.foot_rpy.clone()
     self.foot_rpy_rate = torch.zeros_like(self.foot_rpy)
     self.stance_foot_pos_0 = foot_pos_w[:, 0, :].clone()
-    self.stance_foot_ori_quat_0 = foot_quat_w[:, 0, :].clone()
-    self.stance_foot_ori_0 = self._foot_quat_to_rpy(self.stance_foot_ori_quat_0)
+    self.stance_foot_frame_w_0 = foot_frame_w[:, 0, :, :].clone()
+    self.stance_foot_ori_0 = self._frame_to_rpy(self.stance_foot_frame_w_0)
     self.stance_foot_pos = self.stance_foot_pos_0.clone()
     self.stance_foot_ori = self.stance_foot_ori_0.clone()
     self.stance_foot_vel = torch.zeros(self.num_envs, 3, device=self.device)
@@ -531,13 +515,13 @@ class HLIPReferenceCommand(CommandTerm):
     self.last_landing_error_xy[env_ids] = 0.0
     self.last_landing_valid[env_ids] = 0.0
     foot_pos_w = self._current_foot_pos_w()
-    foot_quat_w = self._current_foot_quat_w()
+    foot_frame_w = self._current_foot_hlip_frame_w()
     self.stance_foot_pos_0[env_ids] = foot_pos_w[env_ids, self.stance_idx[env_ids], :]
-    self.stance_foot_ori_quat_0[env_ids] = foot_quat_w[
-      env_ids, self.stance_idx[env_ids], :
+    self.stance_foot_frame_w_0[env_ids] = foot_frame_w[
+      env_ids, self.stance_idx[env_ids], :, :
     ]
-    self.stance_foot_ori_0[env_ids] = self._foot_quat_to_rpy(
-      self.stance_foot_ori_quat_0[env_ids]
+    self.stance_foot_ori_0[env_ids] = self._frame_to_rpy(
+      self.stance_foot_frame_w_0[env_ids]
     )
     current_upper_body_joint_pos = self.robot.data.joint_pos[
       :, self.upper_body_joint_ids_tensor
@@ -564,25 +548,77 @@ class HLIPReferenceCommand(CommandTerm):
   def _current_foot_quat_w(self) -> torch.Tensor:
     return self.robot.data.body_link_quat_w[:, self.foot_body_ids_tensor, :]
 
-  def _quat_to_rpy(self, quat: torch.Tensor) -> torch.Tensor:
-    roll, pitch, yaw = euler_xyz_from_quat(quat)
+  @staticmethod
+  def _foot_hlip_side_sign(
+    foot_body_names: tuple[str, ...] | list[str],
+    device: torch.device,
+  ) -> torch.Tensor:
+    values = [
+      -1.0 if "right" in foot_name else 1.0
+      for foot_name in foot_body_names
+    ]
+    return torch.tensor(values, device=device, dtype=torch.float32)
+
+  @staticmethod
+  def _make_hlip_frame_w(
+    raw_x_w: torch.Tensor,
+    raw_y_w: torch.Tensor,
+    raw_z_w: torch.Tensor,
+    side_sign: torch.Tensor,
+  ) -> torch.Tensor:
+    side_shape = (1,) * (raw_x_w.dim() - 2) + (side_sign.shape[0], 1)
+    side = side_sign.to(device=raw_x_w.device, dtype=raw_x_w.dtype).reshape(side_shape)
+    hlip_x_w = raw_z_w
+    hlip_y_w = side * raw_x_w
+    hlip_z_w = side * raw_y_w
+    return torch.stack((hlip_x_w, hlip_y_w, hlip_z_w), dim=-1)
+
+  @staticmethod
+  def _hlip_frame_to_world(
+    frame_w: torch.Tensor,
+    vector_l: torch.Tensor,
+  ) -> torch.Tensor:
+    return torch.matmul(frame_w, vector_l.unsqueeze(-1)).squeeze(-1)
+
+  @staticmethod
+  def _world_to_hlip_frame(
+    frame_w: torch.Tensor,
+    vector_w: torch.Tensor,
+  ) -> torch.Tensor:
+    return torch.matmul(frame_w.transpose(-1, -2), vector_w.unsqueeze(-1)).squeeze(-1)
+
+  @staticmethod
+  def _frame_to_rpy(frame_w: torch.Tensor) -> torch.Tensor:
+    roll = torch.atan2(frame_w[..., 2, 1], frame_w[..., 2, 2])
+    pitch = torch.asin(torch.clamp(-frame_w[..., 2, 0], -1.0, 1.0))
+    yaw = torch.atan2(frame_w[..., 1, 0], frame_w[..., 0, 0])
     return torch.stack((wrap_to_pi(roll), wrap_to_pi(pitch), wrap_to_pi(yaw)), dim=-1)
 
-  def _foot_heading_yaw(self, foot_quat_w: torch.Tensor) -> torch.Tensor:
-    forward_axis = self.foot_heading_axis_b.to(dtype=foot_quat_w.dtype).expand(
-      foot_quat_w.reshape(-1, 4).shape[0], 3
+  def _current_foot_hlip_frame_w(self) -> torch.Tensor:
+    foot_quat_w = self._current_foot_quat_w()
+    flat_quat = foot_quat_w.reshape(-1, 4)
+    basis = torch.eye(3, device=self.device, dtype=foot_quat_w.dtype)
+    raw_x_w = quat_apply(
+      flat_quat,
+      basis[0].expand(flat_quat.shape[0], 3),
+    ).reshape(foot_quat_w.shape[:-1] + (3,))
+    raw_y_w = quat_apply(
+      flat_quat,
+      basis[1].expand(flat_quat.shape[0], 3),
+    ).reshape(foot_quat_w.shape[:-1] + (3,))
+    raw_z_w = quat_apply(
+      flat_quat,
+      basis[2].expand(flat_quat.shape[0], 3),
+    ).reshape(foot_quat_w.shape[:-1] + (3,))
+    return self._make_hlip_frame_w(
+      raw_x_w,
+      raw_y_w,
+      raw_z_w,
+      self.foot_hlip_side_sign,
     )
-    heading_vec = quat_apply(foot_quat_w.reshape(-1, 4), forward_axis).reshape(foot_quat_w.shape[:-1] + (3,))
-    return torch.atan2(heading_vec[..., 1], heading_vec[..., 0])
-
-  def _foot_quat_to_rpy(self, foot_quat_w: torch.Tensor) -> torch.Tensor:
-    foot_rpy = self._quat_to_rpy(foot_quat_w.reshape(-1, 4)).reshape(foot_quat_w.shape[:-1] + (3,))
-    foot_rpy[..., 2] = self._foot_heading_yaw(foot_quat_w)
-    return foot_rpy
 
   def _current_foot_rpy(self) -> torch.Tensor:
-    foot_quat_w = self._current_foot_quat_w()
-    return self._foot_quat_to_rpy(foot_quat_w)
+    return self._frame_to_rpy(self._current_foot_hlip_frame_w())
 
   def _rpy_rate_from_previous(self, current: torch.Tensor, previous: torch.Tensor) -> torch.Tensor:
     return wrap_to_pi(current - previous) / max(self._env.step_dt, 1e-6)
@@ -620,11 +656,11 @@ class HLIPReferenceCommand(CommandTerm):
 
   def _current_foot_pos_l(self) -> torch.Tensor:
     foot_pos_w = self._current_foot_pos_w()
-    stance_quat = self.stance_foot_ori_quat_0.unsqueeze(1).expand(
-      foot_pos_w.shape[0], foot_pos_w.shape[1], 4
+    stance_frame_w = self.stance_foot_frame_w_0.unsqueeze(1).expand(
+      foot_pos_w.shape[0], foot_pos_w.shape[1], 3, 3
     )
-    return quat_apply_inverse(
-      stance_quat.reshape(-1, 4),
+    return self._world_to_hlip_frame(
+      stance_frame_w.reshape(-1, 3, 3),
       (foot_pos_w - self.stance_foot_pos_0.unsqueeze(1)).reshape(-1, 3),
     ).reshape(self.num_envs, len(self.foot_body_names), 3)
 
@@ -640,11 +676,11 @@ class HLIPReferenceCommand(CommandTerm):
 
   def _current_foot_vel_l(self) -> torch.Tensor:
     foot_vel_w = self.robot.data.body_link_lin_vel_w[:, self.foot_body_ids_tensor, :]
-    stance_quat = self.stance_foot_ori_quat_0.unsqueeze(1).expand(
-      foot_vel_w.shape[0], foot_vel_w.shape[1], 4
+    stance_frame_w = self.stance_foot_frame_w_0.unsqueeze(1).expand(
+      foot_vel_w.shape[0], foot_vel_w.shape[1], 3, 3
     )
-    return quat_apply_inverse(
-      stance_quat.reshape(-1, 4),
+    return self._world_to_hlip_frame(
+      stance_frame_w.reshape(-1, 3, 3),
       foot_vel_w.reshape(-1, 3),
     ).reshape(self.num_envs, len(self.foot_body_names), 3)
 
@@ -654,7 +690,7 @@ class HLIPReferenceCommand(CommandTerm):
 
   def _update_stance_initial_pose(self) -> None:
     foot_pos_w = self._current_foot_pos_w()
-    foot_quat_w = self._current_foot_quat_w()
+    foot_frame_w = self._current_foot_hlip_frame_w()
     env_ids = torch.arange(self.num_envs, device=self.device)
     reset_like = self._env.episode_length_buf <= 1
     changed = (self.stance_idx != self.prev_stance_idx) | reset_like
@@ -663,14 +699,14 @@ class HLIPReferenceCommand(CommandTerm):
       foot_pos_w[env_ids, self.stance_idx, :],
       self.stance_foot_pos_0,
     )
-    self.stance_foot_ori_quat_0 = torch.where(
-      changed.unsqueeze(1),
-      foot_quat_w[env_ids, self.stance_idx, :],
-      self.stance_foot_ori_quat_0,
+    self.stance_foot_frame_w_0 = torch.where(
+      changed.unsqueeze(1).unsqueeze(2),
+      foot_frame_w[env_ids, self.stance_idx, :, :],
+      self.stance_foot_frame_w_0,
     )
     self.stance_foot_ori_0 = torch.where(
       changed.unsqueeze(1),
-      self._foot_quat_to_rpy(self.stance_foot_ori_quat_0),
+      self._frame_to_rpy(self.stance_foot_frame_w_0),
       self.stance_foot_ori_0,
     )
     self.prev_stance_idx = self.stance_idx.clone()
@@ -678,11 +714,12 @@ class HLIPReferenceCommand(CommandTerm):
   def _update_stance_state(self) -> None:
     env_ids = torch.arange(self.num_envs, device=self.device)
     foot_pos_w = self._current_foot_pos_w()
-    foot_rpy = self._current_foot_rpy()
+    foot_frame_w = self._current_foot_hlip_frame_w()
+    foot_rpy = self._frame_to_rpy(foot_frame_w)
     foot_vel_w = self.robot.data.body_link_lin_vel_w[:, self.foot_body_ids_tensor, :]
     foot_ang_vel_w = self.robot.data.body_link_ang_vel_w[:, self.foot_body_ids_tensor, :]
-    foot_ang_vel = quat_apply_inverse(
-      self._current_foot_quat_w().reshape(-1, 4),
+    foot_ang_vel = self._world_to_hlip_frame(
+      foot_frame_w.reshape(-1, 3, 3),
       foot_ang_vel_w.reshape(-1, 3),
     ).reshape(self.num_envs, len(self.foot_body_names), 3)
     pelvis_rpy = self._current_pelvis_rpy()
@@ -810,8 +847,6 @@ class HLIPReferenceCommand(CommandTerm):
   ) -> None:
     foot_pos_l = self._current_foot_pos_l()
     foot_vel_l = self._current_foot_vel_l()
-    foot_rpy = self.foot_rpy
-    foot_rpy_rate = self.foot_rpy_rate
     root_height = torch.full(
       (self.num_envs,),
       self.cfg.hlip_com_height,
@@ -819,7 +854,6 @@ class HLIPReferenceCommand(CommandTerm):
       dtype=foot_pos_b.dtype,
     )
     del foot_pos_b
-    foot_quat_w = self._current_foot_quat_w()
     swing_indices = torch.where(left_swing, 0, 1)
     swing_foot_pos_l = foot_pos_l[
       torch.arange(self.num_envs, device=self.device),
@@ -829,32 +863,35 @@ class HLIPReferenceCommand(CommandTerm):
       torch.arange(self.num_envs, device=self.device),
       swing_indices,
     ]
-    swing_foot_rpy = foot_rpy[
-      torch.arange(self.num_envs, device=self.device),
-      swing_indices,
-    ].clone()
-    swing_foot_quat_w = foot_quat_w[
+    foot_frame_w = self._current_foot_hlip_frame_w()
+    swing_foot_frame_w = foot_frame_w[
       torch.arange(self.num_envs, device=self.device),
       swing_indices,
     ]
-    swing_foot_rpy[:, :2] = self._quat_to_rpy(
-      _quat_mul(_quat_conjugate(self.stance_foot_ori_quat_0), swing_foot_quat_w)
-    )[:, :2]
-    swing_foot_rpy_rate = foot_rpy_rate[
+    rel_swing_foot_frame = torch.matmul(
+      self.stance_foot_frame_w_0.transpose(-1, -2),
+      swing_foot_frame_w,
+    )
+    swing_foot_rpy = self._frame_to_rpy(rel_swing_foot_frame)
+    swing_foot_ang_vel_w = self.robot.data.body_link_ang_vel_w[
+      :, self.foot_body_ids_tensor, :
+    ][
       torch.arange(self.num_envs, device=self.device),
       swing_indices,
     ]
-    stance_yaw_quat_0 = yaw_quat(self.stance_foot_ori_quat_0)
-    com_pos_l = quat_apply_inverse(
-      stance_yaw_quat_0,
+    swing_foot_rpy_rate = self._world_to_hlip_frame(
+      self.stance_foot_frame_w_0,
+      swing_foot_ang_vel_w,
+    )
+    com_pos_l = self._world_to_hlip_frame(
+      self.stance_foot_frame_w_0,
       self.robot.data.root_com_pos_w - self.stance_foot_pos_0,
     )
-    com_vel_l = quat_apply_inverse(
-      stance_yaw_quat_0,
+    com_vel_l = self._world_to_hlip_frame(
+      self.stance_foot_frame_w_0,
       self.robot.data.root_com_vel_w[:, 0:3],
     )
     stance_yaw_0 = self.stance_foot_ori_0[:, 2]
-    swing_foot_rpy[:, 2] = wrap_to_pi(swing_foot_rpy[:, 2] - stance_yaw_0)
     pelvis_rpy = self.pelvis_rpy.clone()
     pelvis_rpy[:, 2] = wrap_to_pi(pelvis_rpy[:, 2] - stance_yaw_0)
     pelvis_rpy_ref, pelvis_rpy_rate_ref = self._pelvis_reference(command)
@@ -974,8 +1011,8 @@ class HLIPReferenceCommand(CommandTerm):
       landing_actual_xy = self._current_foot_pos_w()[env_ids, landed_foot_idx, :2]
       landing_target_l = torch.zeros(self.num_envs, 3, device=self.device)
       landing_target_l[:, :2] = landing_target_xy_l
-      landing_target_w = self.stance_foot_pos_0 + quat_apply(
-        self.stance_foot_ori_quat_0,
+      landing_target_w = self.stance_foot_pos_0 + self._hlip_frame_to_world(
+        self.stance_foot_frame_w_0,
         landing_target_l,
       )
       landing_target_xy = landing_target_w[:, :2]
@@ -1114,14 +1151,16 @@ class HLIPReferenceCommand(CommandTerm):
 
     ref_pos_l = torch.stack((x_ref_l, y_ref_l, z_ref), dim=-1)
     ref_vel_l = torch.stack((x_ref_l_dot, y_ref_l_dot, z_ref_dot), dim=-1)
-    stance_quat = self.stance_foot_ori_quat_0.unsqueeze(1).expand(
-      self.num_envs, len(self.foot_body_names), 4
+    stance_frame_w = self.stance_foot_frame_w_0.unsqueeze(1).expand(
+      self.num_envs, len(self.foot_body_names), 3, 3
     )
-    ref_pos_w = self.stance_foot_pos_0.unsqueeze(1) + quat_apply(
-      stance_quat.reshape(-1, 4),
+    ref_pos_w = self.stance_foot_pos_0.unsqueeze(1) + self._hlip_frame_to_world(
+      stance_frame_w.reshape(-1, 3, 3),
       ref_pos_l.reshape(-1, 3),
     ).reshape(self.num_envs, len(self.foot_body_names), 3)
-    root_quat = self.robot.data.root_link_quat_w.unsqueeze(1).expand_as(stance_quat)
+    root_quat = self.robot.data.root_link_quat_w.unsqueeze(1).expand(
+      self.num_envs, len(self.foot_body_names), 4
+    )
     root_pos = self.robot.data.root_link_pos_w.unsqueeze(1)
     ref_pos_b = quat_apply_inverse(
       root_quat.reshape(-1, 4),
