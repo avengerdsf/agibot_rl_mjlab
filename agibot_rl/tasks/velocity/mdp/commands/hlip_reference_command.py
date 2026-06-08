@@ -401,6 +401,10 @@ class HLIPReferenceCommand(CommandTerm):
     self.upper_body_joint_ids_tensor = torch.as_tensor(
       self.upper_body_joint_ids, device=self.device, dtype=torch.long
     )
+    self.upper_body_semantic_sign = self._upper_body_semantic_sign(
+      self.upper_body_joint_names,
+      self.device,
+    )
     self.foot_hlip_side_sign = self._foot_hlip_side_sign(
       self.foot_body_names,
       self.device,
@@ -526,10 +530,15 @@ class HLIPReferenceCommand(CommandTerm):
     current_upper_body_joint_pos = self.robot.data.joint_pos[
       :, self.upper_body_joint_ids_tensor
     ]
-    self.upper_body_joint_pos[env_ids] = current_upper_body_joint_pos[env_ids]
-    self.upper_body_joint_vel[env_ids] = self.robot.data.joint_vel[
+    current_upper_body_joint_vel = self.robot.data.joint_vel[
       :, self.upper_body_joint_ids_tensor
-    ][env_ids]
+    ]
+    self.upper_body_joint_pos[env_ids] = (
+      current_upper_body_joint_pos * self.upper_body_semantic_sign.unsqueeze(0)
+    )[env_ids]
+    self.upper_body_joint_vel[env_ids] = (
+      current_upper_body_joint_vel * self.upper_body_semantic_sign.unsqueeze(0)
+    )[env_ids]
     self.prev_upper_body_joint_pos[env_ids] = current_upper_body_joint_pos[env_ids]
     self.upper_body_joint_pos_diff_vel[env_ids] = 0.0
     self.prev_stance_idx[env_ids] = self.stance_idx[env_ids]
@@ -572,6 +581,23 @@ class HLIPReferenceCommand(CommandTerm):
     hlip_y_w = side * raw_x_w
     hlip_z_w = side * raw_y_w
     return torch.stack((hlip_x_w, hlip_y_w, hlip_z_w), dim=-1)
+
+  @staticmethod
+  def _upper_body_semantic_sign(
+    joint_names: tuple[str, ...] | list[str],
+    device: torch.device,
+  ) -> torch.Tensor:
+    values = []
+    for joint_name in joint_names:
+      if (
+        joint_name == "left_shoulder_roll_joint"
+        or joint_name == "right_shoulder_yaw_joint"
+        or "elbow_pitch" in joint_name
+      ):
+        values.append(-1.0)
+      else:
+        values.append(1.0)
+    return torch.tensor(values, device=device, dtype=torch.float32)
 
   @staticmethod
   def _hlip_frame_to_world(
@@ -813,7 +839,7 @@ class HLIPReferenceCommand(CommandTerm):
         offset[:, joint_idx] = torch.pi / 2.0
     default_joint_pos = self.robot.data.default_joint_pos[
       :, self.upper_body_joint_ids_tensor
-    ]
+    ] * self.upper_body_semantic_sign.unsqueeze(0)
     ref = (
       amp
       * sign
@@ -923,12 +949,18 @@ class HLIPReferenceCommand(CommandTerm):
     current_upper_body_joint_vel = self.robot.data.joint_vel[
       :, self.upper_body_joint_ids_tensor
     ]
+    upper_body_joint_pos = (
+      current_upper_body_joint_pos * self.upper_body_semantic_sign.unsqueeze(0)
+    )
+    upper_body_joint_vel = (
+      current_upper_body_joint_vel * self.upper_body_semantic_sign.unsqueeze(0)
+    )
     self.upper_body_joint_pos_diff_vel = (
       wrap_to_pi(current_upper_body_joint_pos - self.prev_upper_body_joint_pos)
       / max(self._env.step_dt, 1e-6)
-    )
-    self.upper_body_joint_pos = current_upper_body_joint_pos
-    self.upper_body_joint_vel = current_upper_body_joint_vel
+    ) * self.upper_body_semantic_sign.unsqueeze(0)
+    self.upper_body_joint_pos = upper_body_joint_pos
+    self.upper_body_joint_vel = upper_body_joint_vel
     self.prev_upper_body_joint_pos = current_upper_body_joint_pos.clone()
 
     self.y_out = torch.cat(
@@ -947,7 +979,7 @@ class HLIPReferenceCommand(CommandTerm):
         pelvis_rpy,
         swing_foot_pos_l,
         swing_foot_rpy,
-        current_upper_body_joint_pos,
+        upper_body_joint_pos,
       ),
       dim=1,
     )
@@ -967,7 +999,7 @@ class HLIPReferenceCommand(CommandTerm):
         self.pelvis_rpy_rate,
         swing_foot_vel_l,
         swing_foot_rpy_rate,
-        current_upper_body_joint_vel,
+        upper_body_joint_vel,
       ),
       dim=1,
     )
