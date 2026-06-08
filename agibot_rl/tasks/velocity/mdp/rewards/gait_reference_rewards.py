@@ -147,6 +147,117 @@ def gait_reference_joint_pos(
   return torch.exp(-weighted_error / std**2)
 
 
+def _log_scalar(log: dict[str, torch.Tensor], key: str, value: torch.Tensor) -> None:
+  log[key] = value.detach() if isinstance(value, torch.Tensor) else value
+
+
+def _trace_value(
+  value: torch.Tensor | None,
+  env_id: int,
+) -> torch.Tensor | None:
+  if value is None or not isinstance(value, torch.Tensor):
+    return None
+  if value.dim() == 0:
+    return value
+  if value.shape[0] <= env_id:
+    return None
+  return value[env_id]
+
+
+def _log_hlip_single_env_trace(env, command_term) -> None:
+  y_act = getattr(command_term, "y_act", None)
+  y_ref = getattr(command_term, "y_out", None)
+  dy_act = getattr(command_term, "dy_act", None)
+  dy_ref = getattr(command_term, "dy_out", None)
+  if (
+    not isinstance(y_act, torch.Tensor)
+    or not isinstance(y_ref, torch.Tensor)
+    or not isinstance(dy_act, torch.Tensor)
+    or not isinstance(dy_ref, torch.Tensor)
+    or y_act.dim() != 2
+    or y_ref.shape != y_act.shape
+    or dy_act.shape != y_act.shape
+    or dy_ref.shape != y_act.shape
+    or y_act.shape[1] < 12
+  ):
+    return
+
+  trace_env_id = int(getattr(command_term, "hlip_trace_env_id", 0))
+  if trace_env_id < 0 or trace_env_id >= y_act.shape[0]:
+    return
+
+  env.extras.setdefault("log", {})
+  log = env.extras["log"]
+  prefix = f"Metrics/hlip_trace/env{trace_env_id}"
+  axis_names = ("roll", "pitch", "yaw")
+  xyz_names = ("x", "y", "z")
+  upper_body_joint_names = getattr(command_term, "upper_body_joint_names", ())
+
+  phase_fields = (
+    "phase",
+    "phase_var",
+    "cur_swing_time",
+    "stance_idx",
+    "swing_idx",
+  )
+  for field in phase_fields:
+    value = _trace_value(getattr(command_term, field, None), trace_env_id)
+    if value is not None:
+      _log_scalar(log, f"{prefix}/{field}", value)
+
+  command = getattr(command_term, "last_command", None)
+  command_value = _trace_value(command, trace_env_id)
+  if command_value is not None and command_value.numel() >= 3:
+    _log_scalar(log, f"{prefix}/command_x", command_value[0])
+    _log_scalar(log, f"{prefix}/command_y", command_value[1])
+    _log_scalar(log, f"{prefix}/command_yaw", command_value[2])
+
+  for idx, axis in enumerate(xyz_names):
+    _log_scalar(log, f"{prefix}/com_act/pos_{axis}", y_act[trace_env_id, idx])
+    _log_scalar(log, f"{prefix}/com_ref/pos_{axis}", y_ref[trace_env_id, idx])
+    _log_scalar(log, f"{prefix}/com_act/vel_{axis}", dy_act[trace_env_id, idx])
+    _log_scalar(log, f"{prefix}/com_ref/vel_{axis}", dy_ref[trace_env_id, idx])
+
+  for idx, axis in enumerate(axis_names):
+    pelvis_idx = 3 + idx
+    swing_idx = 9 + idx
+    _log_scalar(log, f"{prefix}/pelvis_rpy_act/{axis}", y_act[trace_env_id, pelvis_idx])
+    _log_scalar(log, f"{prefix}/pelvis_rpy_ref/{axis}", y_ref[trace_env_id, pelvis_idx])
+    _log_scalar(log, f"{prefix}/pelvis_rate_act/{axis}", dy_act[trace_env_id, pelvis_idx])
+    _log_scalar(log, f"{prefix}/pelvis_rate_ref/{axis}", dy_ref[trace_env_id, pelvis_idx])
+    _log_scalar(log, f"{prefix}/swing_foot_rpy_act/{axis}", y_act[trace_env_id, swing_idx])
+    _log_scalar(log, f"{prefix}/swing_foot_rpy_ref/{axis}", y_ref[trace_env_id, swing_idx])
+    _log_scalar(log, f"{prefix}/swing_foot_rate_act/{axis}", dy_act[trace_env_id, swing_idx])
+    _log_scalar(log, f"{prefix}/swing_foot_rate_ref/{axis}", dy_ref[trace_env_id, swing_idx])
+
+  upper_body_start = 12
+  for joint_idx, joint_name in enumerate(upper_body_joint_names):
+    output_idx = upper_body_start + joint_idx
+    if output_idx >= y_act.shape[1]:
+      break
+    _log_scalar(log, f"{prefix}/upper_body_joint_pos_act/{joint_name}", y_act[trace_env_id, output_idx])
+    _log_scalar(log, f"{prefix}/upper_body_joint_pos_ref/{joint_name}", y_ref[trace_env_id, output_idx])
+    _log_scalar(log, f"{prefix}/upper_body_joint_vel_act/{joint_name}", dy_act[trace_env_id, output_idx])
+    _log_scalar(log, f"{prefix}/upper_body_joint_vel_ref/{joint_name}", dy_ref[trace_env_id, output_idx])
+
+  metrics = getattr(command_term, "metrics", {})
+  metric_names = (
+    ("step_ref_x", "step_ref_x"),
+    ("step_ref_y", "step_ref_y"),
+    ("landing_actual_x", "landing/actual_x"),
+    ("landing_actual_y", "landing/actual_y"),
+    ("landing_target_x", "landing/target_x"),
+    ("landing_target_y", "landing/target_y"),
+    ("landing_error_x", "landing/error_x"),
+    ("landing_error_y", "landing/error_y"),
+    ("landing_valid", "landing/valid"),
+  )
+  for source_name, trace_name in metric_names:
+    value = _trace_value(metrics.get(source_name), trace_env_id)
+    if value is not None:
+      _log_scalar(log, f"{prefix}/{trace_name}", value)
+
+
 def clf_reward(
   env,
   command_name: str,
@@ -158,6 +269,7 @@ def clf_reward(
   reward = torch.exp(-torch.clamp(command_term.v, max=5.0 * max_clf) / max_clf)
   env.extras.setdefault("log", {})
   env.extras["log"]["Metrics/hlip_clf_v"] = torch.mean(command_term.v)
+  _log_hlip_single_env_trace(env, command_term)
   y_err = getattr(
     command_term.clf,
     "last_y_err",
