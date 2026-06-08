@@ -473,10 +473,6 @@ class HLIPReferenceCommand(CommandTerm):
       self.num_envs, len(self.upper_body_joint_ids), device=self.device
     )
     self.upper_body_joint_vel = torch.zeros_like(self.upper_body_joint_pos)
-    self.prev_upper_body_joint_pos = self.robot.data.joint_pos[
-      :, self.upper_body_joint_ids_tensor
-    ].clone()
-    self.upper_body_joint_pos_diff_vel = torch.zeros_like(self.upper_body_joint_pos)
     self.v = torch.zeros(self.num_envs, device=self.device)
     self.vdot = torch.zeros_like(self.v)
     self.clf = _ContinuousTimeClf(
@@ -539,8 +535,6 @@ class HLIPReferenceCommand(CommandTerm):
     self.upper_body_joint_vel[env_ids] = (
       current_upper_body_joint_vel * self.upper_body_semantic_sign.unsqueeze(0)
     )[env_ids]
-    self.prev_upper_body_joint_pos[env_ids] = current_upper_body_joint_pos[env_ids]
-    self.upper_body_joint_pos_diff_vel[env_ids] = 0.0
     self.prev_stance_idx[env_ids] = self.stance_idx[env_ids]
     self.clf.reset(env_ids)
 
@@ -955,13 +949,8 @@ class HLIPReferenceCommand(CommandTerm):
     upper_body_joint_vel = (
       current_upper_body_joint_vel * self.upper_body_semantic_sign.unsqueeze(0)
     )
-    self.upper_body_joint_pos_diff_vel = (
-      wrap_to_pi(current_upper_body_joint_pos - self.prev_upper_body_joint_pos)
-      / max(self._env.step_dt, 1e-6)
-    ) * self.upper_body_semantic_sign.unsqueeze(0)
     self.upper_body_joint_pos = upper_body_joint_pos
     self.upper_body_joint_vel = upper_body_joint_vel
-    self.prev_upper_body_joint_pos = current_upper_body_joint_pos.clone()
 
     self.y_out = torch.cat(
       (
