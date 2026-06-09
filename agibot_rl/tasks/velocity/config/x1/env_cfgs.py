@@ -370,7 +370,7 @@ def agibot_x1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   )
   cfg.rewards["hlip_holonomic_constraint"] = RewardTermCfg(
     func=mdp.holonomic_constraint,
-    weight=0.4,
+    weight=2.0,
     params={
       "command_name": "hlip_ref",
       "sigma_pose": math.sqrt(5.0 * 0.01),
@@ -378,7 +378,7 @@ def agibot_x1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   )
   cfg.rewards["hlip_holonomic_constraint_vel"] = RewardTermCfg(
     func=mdp.holonomic_constraint_vel,
-    weight=0.2,
+    weight=1.0,
     params={
       "command_name": "hlip_ref",
       "sigma_vel": math.sqrt(0.1),
