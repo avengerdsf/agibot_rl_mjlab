@@ -360,7 +360,7 @@ def agibot_x1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   )
   cfg.rewards["hlip_clf_reward"] = RewardTermCfg(
     func=mdp.clf_reward,
-    weight=10.0,
+    weight=4.0,
     params={
       "command_name": "hlip_ref",
       "max_eta_err": 0.25,
