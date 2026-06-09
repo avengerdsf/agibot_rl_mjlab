@@ -195,9 +195,11 @@ def agibot_x1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   twist_cmd = cfg.commands["twist"]
   assert isinstance(twist_cmd, X1VelocityCommandCfg)
   twist_cmd.viz.z_offset = 1.0
+  gait_period = 0.7
+  contact_phase_threshold = 0.56
   cfg.commands["gait_phase"] = GaitPhaseCommandCfg(
     resampling_time_range=(1e9, 1e9),
-    period=0.7,
+    period=gait_period,
   )
   cfg.observations["actor"].terms["phase"].func = mdp.generated_commands
   cfg.observations["actor"].terms["phase"].params = {"command_name": "gait_phase"}
@@ -207,14 +209,14 @@ def agibot_x1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     entity_name="robot",
     resampling_time_range=(1e9, 1e9),
     velocity_command_name="twist",
-    reference_period=0.7,
+    reference_period=gait_period,
     reference_command_threshold=0.1,
     foot_body_names=X1_FOOT_BODIES,
     swing_clearance=0.12,
     swing_step_x_min=-0.25,
     swing_step_x_max=0.50,
     hlip_com_height=0.61,
-    hlip_double_support_time=0.1,
+    hlip_double_support_time=(contact_phase_threshold - 0.5) * gait_period,
     hlip_step_width=0.26,
   )
 
@@ -296,12 +298,12 @@ def agibot_x1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   cfg.observations["critic"].enable_corruption = False
 
 
-  cfg.rewards["track_linear_velocity"].weight = 1.0
-  cfg.rewards["track_angular_velocity"].weight = 1.0
+  cfg.rewards["track_linear_velocity"].weight = 0.3
+  cfg.rewards["track_angular_velocity"].weight = 0.3
   cfg.rewards["track_linear_velocity"].params["std"] = math.sqrt(0.16)
   cfg.rewards["track_angular_velocity"].params["std"] = math.sqrt(0.1)
   cfg.rewards["track_vel_hard"].params["sigma_v"] = 0.30
-  cfg.rewards["track_vel_hard"].weight = 0.80
+  cfg.rewards["track_vel_hard"].weight = 0.0
   # cfg.rewards["track_linear_velocity"] = None
   # cfg.rewards["track_angular_velocity"] = None
   # cfg.rewards["track_vel_hard"]  = None
@@ -374,6 +376,13 @@ def agibot_x1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       "eta_dot_max": 0.3,
     },
   )
+  cfg.rewards["hlip_upper_body_vel_error"] = RewardTermCfg(
+    func=mdp.hlip_upper_body_vel_error,
+    weight=-0.03,
+    params={
+      "command_name": "hlip_ref",
+    },
+  )
   cfg.rewards["hlip_holonomic_constraint"] = RewardTermCfg(
     func=mdp.holonomic_constraint,
     weight=0.4,
@@ -394,9 +403,9 @@ def agibot_x1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   cfg.rewards["foot_slip"].params["sensor_name"] = feet_slip_cfg.name
   cfg.rewards["foot_slip"].params["asset_cfg"] = foot_geom_cfg
   cfg.rewards["foot_slip"].params["num_feet"] = 2
-  cfg.rewards["foot_slip"].params["period"] = 0.7
+  cfg.rewards["foot_slip"].params["period"] = gait_period
   cfg.rewards["foot_slip"].params["offset"] = [0.0, 0.5]
-  cfg.rewards["foot_slip"].params["threshold"] = 0.56
+  cfg.rewards["foot_slip"].params["threshold"] = contact_phase_threshold
   cfg.rewards["foot_slip"].params["min_contact_fraction"] = 0.5
   cfg.rewards["foot_slip"].weight = -0.05
 
@@ -407,9 +416,9 @@ def agibot_x1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     weight=-2.0,
     params={
       "sensor_name": feet_slip_cfg.name,
-      "period": 0.7,
+      "period": gait_period,
       "offset": [0.0, 0.5],
-      "threshold": 0.56,
+      "threshold": contact_phase_threshold,
       "command_name": "twist",
       "command_threshold": 0.1,
       "num_feet": 2,

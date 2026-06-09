@@ -370,6 +370,20 @@ def clf_decreasing_condition(
   return penalty
 
 
+def hlip_upper_body_vel_error(
+  env,
+  command_name: str,
+) -> torch.Tensor:
+  command_term = env.command_manager.get_term(command_name)
+  vel_error = command_term.upper_body_joint_vel - command_term.ref_joint_vel
+  penalty = torch.mean(torch.square(vel_error), dim=1)
+  env.extras.setdefault("log", {})
+  env.extras["log"]["Metrics/hlip_upper_body_vel_error"] = torch.mean(
+    torch.sqrt(penalty)
+  )
+  return penalty
+
+
 def holonomic_constraint(
   env,
   command_name: str,

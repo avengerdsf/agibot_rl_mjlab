@@ -455,6 +455,7 @@ class HLIPReferenceCommand(CommandTerm):
       step_width=cfg.hlip_step_width,
     )
     self.ref_joint_pos = torch.zeros(self.num_envs, 0, device=self.device)
+    self.ref_joint_vel = torch.zeros_like(self.ref_joint_pos)
     self.ref_joint_ids_tensor = torch.empty(0, device=self.device, dtype=torch.long)
     # COM xyz, pelvis rpy, swing foot xyz/rpy, then target-project upper-body joints.
     self.n_outputs = 6 + 3 * len(self.foot_body_names) + len(self.upper_body_joint_ids)
@@ -964,6 +965,8 @@ class HLIPReferenceCommand(CommandTerm):
     )
     self.upper_body_joint_pos = upper_body_joint_pos
     self.upper_body_joint_vel = upper_body_joint_vel
+    self.ref_joint_pos = ref_upper_body_joint_pos
+    self.ref_joint_vel = ref_upper_body_joint_vel
 
     self.y_out = torch.cat(
       (
@@ -1279,8 +1282,8 @@ class HLIPReferenceCommandCfg(CommandTermCfg):
     "right_elbow_pitch_.*",
   )
   waist_yaw_ref: float = 0.0
-  shoulder_ref: tuple[float, float, float] = (0.16, 0.0, 0.0)
-  elbow_ref: float = 0.1
+  shoulder_ref: tuple[float, float, float] = (0.45, 0.0, 0.0)
+  elbow_ref: float = 0.30
   trace_env_id: int = 0
   q_weights: tuple[float, ...] = HLIP_CLF_Q_WEIGHTS
   r_weights: tuple[float, ...] = HLIP_CLF_R_WEIGHTS
