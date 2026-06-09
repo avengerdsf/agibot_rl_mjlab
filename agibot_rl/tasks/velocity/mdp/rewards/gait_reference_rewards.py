@@ -375,7 +375,10 @@ def hlip_upper_body_vel_error(
   command_name: str,
 ) -> torch.Tensor:
   command_term = env.command_manager.get_term(command_name)
-  vel_error = command_term.upper_body_joint_vel - command_term.ref_joint_vel
+  ref_joint_vel = command_term.ref_joint_vel
+  if ref_joint_vel.shape != command_term.upper_body_joint_vel.shape:
+    ref_joint_vel = command_term.dy_out[:, 12:]
+  vel_error = command_term.upper_body_joint_vel - ref_joint_vel
   penalty = torch.mean(torch.square(vel_error), dim=1)
   env.extras.setdefault("log", {})
   env.extras["log"]["Metrics/hlip_upper_body_vel_error"] = torch.mean(

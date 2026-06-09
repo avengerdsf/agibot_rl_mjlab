@@ -454,7 +454,9 @@ class HLIPReferenceCommand(CommandTerm):
       step_time=0.5 * cfg.reference_period,
       step_width=cfg.hlip_step_width,
     )
-    self.ref_joint_pos = torch.zeros(self.num_envs, 0, device=self.device)
+    self.ref_joint_pos = torch.zeros(
+      self.num_envs, len(self.upper_body_joint_ids), device=self.device
+    )
     self.ref_joint_vel = torch.zeros_like(self.ref_joint_pos)
     self.ref_joint_ids_tensor = torch.empty(0, device=self.device, dtype=torch.long)
     # COM xyz, pelvis rpy, swing foot xyz/rpy, then target-project upper-body joints.
