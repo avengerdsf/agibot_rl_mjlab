@@ -784,6 +784,7 @@ class HLIPReferenceCommand(CommandTerm):
   def _pelvis_reference(
     self,
     command: torch.Tensor,
+    stance_yaw_0: torch.Tensor,
   ) -> tuple[torch.Tensor, torch.Tensor]:
     tp = self.phase
     roll_ref = -0.05 * torch.sin(2.0 * torch.pi * tp)
@@ -794,7 +795,7 @@ class HLIPReferenceCommand(CommandTerm):
       0.2,
     )
     pitch_ref = 0.02 * torch.sin(2.0 * torch.pi * tp)
-    yaw_ref = command[:, 2] * self.cur_swing_time
+    yaw_ref = stance_yaw_0 + command[:, 2] * self.cur_swing_time
     pelvis_rpy_ref = torch.stack((roll_ref, pitch_ref, wrap_to_pi(yaw_ref)), dim=1)
 
     dphase_dt = 1.0 / torch.clamp(
@@ -900,11 +901,7 @@ class HLIPReferenceCommand(CommandTerm):
       torch.arange(self.num_envs, device=self.device),
       swing_indices,
     ]
-    rel_swing_foot_frame = torch.matmul(
-      self.stance_foot_frame_w_0.transpose(-1, -2),
-      swing_foot_frame_w,
-    )
-    swing_foot_rpy = self._frame_to_rpy(rel_swing_foot_frame)
+    swing_foot_rpy = self._frame_to_rpy(swing_foot_frame_w)
     swing_foot_ang_vel_w = self.robot.data.body_link_ang_vel_w[
       :, self.foot_body_ids_tensor, :
     ][
@@ -927,10 +924,9 @@ class HLIPReferenceCommand(CommandTerm):
       self.stance_foot_frame_w_0,
       self.robot.data.root_com_vel_w[:, 0:3],
     )
-    stance_yaw_0 = self.stance_foot_ori_0[:, 2]
     pelvis_rpy = self.pelvis_rpy.clone()
-    pelvis_rpy[:, 2] = wrap_to_pi(pelvis_rpy[:, 2] - stance_yaw_0)
-    pelvis_rpy_ref, pelvis_rpy_rate_ref = self._pelvis_reference(command)
+    stance_yaw_0 = self.stance_foot_ori_0[:, 2]
+    pelvis_rpy_ref, pelvis_rpy_rate_ref = self._pelvis_reference(command, stance_yaw_0)
 
     cur_step_time = self.cur_swing_time
     x_ref, x_ref_dot = self.hlip.compute_com_trajectory(cur_step_time, self.hlip_x_init)
@@ -1233,7 +1229,10 @@ class HLIPReferenceCommand(CommandTerm):
     self.metrics["landing_error_y"] = self.last_landing_error_xy[:, 1].clone()
     self.metrics["landing_valid"] = self.last_landing_valid.clone()
     self.metrics["step_x_clipped"] = x_clipped * swing_mask.any(dim=1).float()
-    pelvis_rpy_ref, pelvis_rpy_rate_ref = self._pelvis_reference(command)
+    pelvis_rpy_ref, pelvis_rpy_rate_ref = self._pelvis_reference(
+      command,
+      self.stance_foot_ori_0[:, 2],
+    )
     ref_swing_foot_rpy = torch.zeros_like(pelvis_rpy_ref)
     ref_swing_foot_rpy[:, 2] = pelvis_rpy_ref[:, 2]
     ref_swing_foot_rpy_rate = torch.zeros_like(ref_swing_foot_rpy)

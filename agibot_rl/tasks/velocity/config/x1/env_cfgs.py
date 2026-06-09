@@ -319,21 +319,6 @@ def agibot_x1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       "log_prefix": "Metrics/base_acc",
     },
   )
-  # cfg.rewards["base_heading_tracking"] = RewardTermCfg(
-  #   func=mdp.base_heading_tracking,
-  #   weight=0.5,
-  #   params={
-  #     "command_name": "twist",
-  #     "sigma": 0.5,
-  #     "command_threshold": 0.05,
-  #     "reward_scale": 2.0,
-  #   },
-  # )
-  cfg.rewards["yaw_rate_zero_command"] = RewardTermCfg(
-    func=mdp.yaw_rate_zero_command_penalty,
-    weight=-1.0,
-    params={"command_name": "twist", "command_threshold": 0.05},
-  )
   cfg.rewards["foot_gait"] = None
   cfg.rewards["foot_clearance"] = None
   # cfg.rewards["feet_swing_height"] = RewardTermCfg(
