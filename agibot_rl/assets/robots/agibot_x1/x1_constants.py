@@ -75,7 +75,7 @@ X1_ACTUATOR_SHOULDER_PITCH = BuiltinPositionActuatorCfg(
         ".*_elbow_pitch_joint",
     ),
     stiffness=40.0,
-    damping=3.0,
+    damping=2.0,
     effort_limit=35.0,
     armature=0.01,
 )
@@ -88,7 +88,7 @@ X1_ACTUATOR_FIXED_ARM = BuiltinPositionActuatorCfg(
         ".*_wrist_roll_joint",
     ),
     stiffness=30.0,
-    damping=0.5,
+    damping=0.1,
     effort_limit=35.0,
     armature=0.01,
 )
@@ -98,7 +98,7 @@ X1_ACTUATOR_HIP_PITCH = BuiltinPositionActuatorCfg(
         ".*_hip_pitch_joint",
     ),
     stiffness=150.0,
-    damping=3.0,
+    damping=2.0,
     effort_limit=120.0,
     armature=0.01,
 )
@@ -108,7 +108,7 @@ X1_ACTUATOR_HIP_ROLL = BuiltinPositionActuatorCfg(
         ".*_hip_roll_joint",
     ),
     stiffness=100.0,
-    damping=3.0,
+    damping=2.0,
     effort_limit=120.0,
     armature=0.01,
 )
@@ -118,7 +118,7 @@ X1_ACTUATOR_HIP_YAW = BuiltinPositionActuatorCfg(
         ".*_hip_yaw_joint",
     ),
     stiffness=150.0,
-    damping=3.0,
+    damping=2.0,
     effort_limit=120.0,
     armature=0.01,
 )
@@ -128,7 +128,7 @@ X1_ACTUATOR_KNEE = BuiltinPositionActuatorCfg(
         ".*_knee_pitch_joint",
     ),
     stiffness=150.0,
-    damping=3.0,
+    damping=2.0,
     effort_limit=120.0,
     armature=0.01,
 )
@@ -138,7 +138,7 @@ X1_ACTUATOR_ANKLE_PITCH = BuiltinPositionActuatorCfg(
         ".*_ankle_pitch_joint",
     ),
     stiffness=40.0,
-    damping=3.0,
+    damping=2.0,
     effort_limit=80.0,
     armature=0.01,
 )
@@ -148,7 +148,7 @@ X1_ACTUATOR_ANKLE_ROLL = BuiltinPositionActuatorCfg(
         ".*_ankle_roll_joint",
     ),
     stiffness=40.0,
-    damping=3.0,
+    damping=2.0,
     effort_limit=80.0,
     armature=0.01,
 )
