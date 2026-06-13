@@ -470,10 +470,10 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
         "velocity_stages": [
           # 阶段1：极低速，先学站
           {"step": 0, "lin_vel_x": (0.0, 0.4), "lin_vel_y": (0.0, 0.0), "ang_vel_z": (0.0, 0.0)},
-          # 阶段2：低速行走
-          {"step": 2000 * 24, "lin_vel_x": (-0.3, 0.6), "lin_vel_y": (0.0, 0.0), "ang_vel_z":  (0.0, 0.0)},
-          # 阶段3：最终速度范围，但前进最大到 1.0
-          {"step": 5000 * 24, "lin_vel_x": (-0.5, 1.0), "lin_vel_y": (0.0, 0.0), "ang_vel_z":  (0.0, 0.0)},
+          # 阶段2：保持低速上限做高速失配对照
+          {"step": 2000 * 24, "lin_vel_x": (0.0, 0.4), "lin_vel_y": (0.0, 0.0), "ang_vel_z":  (0.0, 0.0)},
+          # 阶段3：保持低速上限做高速失配对照
+          {"step": 5000 * 24, "lin_vel_x": (0.0, 0.4), "lin_vel_y": (0.0, 0.0), "ang_vel_z":  (0.0, 0.0)},
         ],
       },
     ),
