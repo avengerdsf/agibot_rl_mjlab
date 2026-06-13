@@ -47,6 +47,10 @@ class UniformVelocityCommand(CommandTerm):
     self.metrics["error_vel_x"] = torch.zeros(self.num_envs, device=self.device)
     self.metrics["error_vel_y"] = torch.zeros(self.num_envs, device=self.device)
     self.metrics["error_vel_yaw"] = torch.zeros(self.num_envs, device=self.device)
+    self.metrics["command_vel_x"] = torch.zeros(self.num_envs, device=self.device)
+    self.metrics["command_vel_y"] = torch.zeros(self.num_envs, device=self.device)
+    self.metrics["actual_vel_x"] = torch.zeros(self.num_envs, device=self.device)
+    self.metrics["actual_vel_y"] = torch.zeros(self.num_envs, device=self.device)
 
     # Set by create_gui() when the viewer is active.
     self._joystick_enabled: viser.GuiCheckboxHandle | None = None
@@ -83,6 +87,10 @@ class UniformVelocityCommand(CommandTerm):
       torch.abs(self.vel_command_b[:, 2] - self.robot.data.root_link_ang_vel_b[:, 2])
       / max_command_step
     )
+    self.metrics["command_vel_x"] += self.vel_command_b[:, 0] / max_command_step
+    self.metrics["command_vel_y"] += self.vel_command_b[:, 1] / max_command_step
+    self.metrics["actual_vel_x"] += self.robot.data.root_link_lin_vel_b[:, 0] / max_command_step
+    self.metrics["actual_vel_y"] += self.robot.data.root_link_lin_vel_b[:, 1] / max_command_step
 
   def _resample_command(self, env_ids: torch.Tensor) -> None:
     r = torch.empty(len(env_ids), device=self.device)

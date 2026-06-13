@@ -189,9 +189,7 @@ def _log_hlip_single_env_trace(env, command_term) -> None:
   env.extras.setdefault("log", {})
   log = env.extras["log"]
   prefix = f"Metrics/hlip_trace/env{trace_env_id}"
-  axis_names = ("roll", "pitch", "yaw")
   xyz_names = ("x", "y", "z")
-  upper_body_joint_names = getattr(command_term, "upper_body_joint_names", ())
 
   phase_fields = (
     "phase",
@@ -212,33 +210,31 @@ def _log_hlip_single_env_trace(env, command_term) -> None:
     _log_scalar(log, f"{prefix}/command_y", command_value[1])
     _log_scalar(log, f"{prefix}/command_yaw", command_value[2])
 
+  robot = getattr(command_term, "robot", None)
+  robot_data = getattr(robot, "data", None)
+  root_link_lin_vel_b = _trace_value(
+    getattr(robot_data, "root_link_lin_vel_b", None),
+    trace_env_id,
+  )
+  if root_link_lin_vel_b is not None and root_link_lin_vel_b.numel() >= 2:
+    _log_scalar(log, f"{prefix}/root_link_vel_b/x", root_link_lin_vel_b[0])
+    _log_scalar(log, f"{prefix}/root_link_vel_b/y", root_link_lin_vel_b[1])
+    if command_value is not None and command_value.numel() >= 2:
+      _log_scalar(log, f"{prefix}/twist_error/x", root_link_lin_vel_b[0] - command_value[0])
+      _log_scalar(log, f"{prefix}/twist_error/y", root_link_lin_vel_b[1] - command_value[1])
+
+  root_com_vel_w = _trace_value(
+    getattr(robot_data, "root_com_vel_w", None),
+    trace_env_id,
+  )
+  if root_com_vel_w is not None and root_com_vel_w.numel() >= 3:
+    _log_scalar(log, f"{prefix}/root_com_vel_w/x", root_com_vel_w[0])
+    _log_scalar(log, f"{prefix}/root_com_vel_w/y", root_com_vel_w[1])
+
   for idx, axis in enumerate(xyz_names):
-    _log_scalar(log, f"{prefix}/com_act/pos_{axis}", y_act[trace_env_id, idx])
-    _log_scalar(log, f"{prefix}/com_ref/pos_{axis}", y_ref[trace_env_id, idx])
     _log_scalar(log, f"{prefix}/com_act/vel_{axis}", dy_act[trace_env_id, idx])
     _log_scalar(log, f"{prefix}/com_ref/vel_{axis}", dy_ref[trace_env_id, idx])
-
-  for idx, axis in enumerate(axis_names):
-    pelvis_idx = 3 + idx
-    swing_idx = 9 + idx
-    _log_scalar(log, f"{prefix}/pelvis_rpy_act/{axis}", y_act[trace_env_id, pelvis_idx])
-    _log_scalar(log, f"{prefix}/pelvis_rpy_ref/{axis}", y_ref[trace_env_id, pelvis_idx])
-    _log_scalar(log, f"{prefix}/pelvis_rate_act/{axis}", dy_act[trace_env_id, pelvis_idx])
-    _log_scalar(log, f"{prefix}/pelvis_rate_ref/{axis}", dy_ref[trace_env_id, pelvis_idx])
-    _log_scalar(log, f"{prefix}/swing_foot_rpy_act/{axis}", y_act[trace_env_id, swing_idx])
-    _log_scalar(log, f"{prefix}/swing_foot_rpy_ref/{axis}", y_ref[trace_env_id, swing_idx])
-    _log_scalar(log, f"{prefix}/swing_foot_rate_act/{axis}", dy_act[trace_env_id, swing_idx])
-    _log_scalar(log, f"{prefix}/swing_foot_rate_ref/{axis}", dy_ref[trace_env_id, swing_idx])
-
-  upper_body_start = 12
-  for joint_idx, joint_name in enumerate(upper_body_joint_names):
-    output_idx = upper_body_start + joint_idx
-    if output_idx >= y_act.shape[1]:
-      break
-    _log_scalar(log, f"{prefix}/upper_body_joint_pos_act/{joint_name}", y_act[trace_env_id, output_idx])
-    _log_scalar(log, f"{prefix}/upper_body_joint_pos_ref/{joint_name}", y_ref[trace_env_id, output_idx])
-    _log_scalar(log, f"{prefix}/upper_body_joint_vel_act/{joint_name}", dy_act[trace_env_id, output_idx])
-    _log_scalar(log, f"{prefix}/upper_body_joint_vel_ref/{joint_name}", dy_ref[trace_env_id, output_idx])
+    _log_scalar(log, f"{prefix}/com_vel_error/{axis}", dy_act[trace_env_id, idx] - dy_ref[trace_env_id, idx])
 
   metrics = getattr(command_term, "metrics", {})
   metric_names = (
@@ -295,42 +291,11 @@ def clf_reward(
     )
     env.extras["log"]["Metrics/hlip_clf/mean_abs_y_err"] = torch.mean(y_err_abs)
     env.extras["log"]["Metrics/hlip_clf/mean_abs_dy_err"] = torch.mean(dy_err_abs)
-    y_err_dim_mean = torch.mean(y_err_abs, dim=0)
-    dy_err_dim_mean = torch.mean(dy_err_abs, dim=0)
     if dy_act.shape == dy_err.shape and dy_ref.shape == dy_err.shape:
       dy_act_abs = torch.abs(dy_act)
       dy_ref_abs = torch.abs(dy_ref)
-      dy_act_dim_mean = torch.mean(dy_act_abs, dim=0)
-      dy_ref_dim_mean = torch.mean(dy_ref_abs, dim=0)
       env.extras["log"]["Metrics/hlip_clf/mean_abs_dy_act"] = torch.mean(dy_act_abs)
       env.extras["log"]["Metrics/hlip_clf/mean_abs_dy_ref"] = torch.mean(dy_ref_abs)
-    else:
-      dy_act_dim_mean = None
-      dy_ref_dim_mean = None
-    env.extras["log"]["Metrics/hlip_clf/mean_abs_y_err_dim"] = torch.argmax(y_err_dim_mean)
-    env.extras["log"]["Metrics/hlip_clf/mean_abs_dy_err_dim"] = torch.argmax(dy_err_dim_mean)
-    output_names = getattr(command_term, "output_names", ())
-    if len(output_names) == y_err.shape[1]:
-      for idx, name in enumerate(output_names):
-        env.extras["log"][f"Metrics/hlip_clf/y_err_mean_by_dim/{name}"] = y_err_dim_mean[idx]
-        env.extras["log"][f"Metrics/hlip_clf/dy_err_mean_by_dim/{name}"] = dy_err_dim_mean[idx]
-        if dy_act_dim_mean is not None and dy_ref_dim_mean is not None:
-          env.extras["log"][f"Metrics/hlip_clf/dy_act_mean_by_dim/{name}"] = dy_act_dim_mean[idx]
-          env.extras["log"][f"Metrics/hlip_clf/dy_ref_mean_by_dim/{name}"] = dy_ref_dim_mean[idx]
-      upper_body_joint_names = getattr(command_term, "upper_body_joint_names", ())
-      upper_body_joint_pos = getattr(command_term, "upper_body_joint_pos", None)
-      upper_body_joint_vel = getattr(command_term, "upper_body_joint_vel", None)
-      if (
-        upper_body_joint_pos is not None
-        and upper_body_joint_vel is not None
-        and len(upper_body_joint_names) == upper_body_joint_pos.shape[1]
-        and upper_body_joint_vel.shape == upper_body_joint_pos.shape
-      ):
-        upper_body_joint_pos_mean = torch.mean(torch.abs(upper_body_joint_pos), dim=0)
-        upper_body_joint_vel_mean = torch.mean(torch.abs(upper_body_joint_vel), dim=0)
-        for idx, name in enumerate(upper_body_joint_names):
-          env.extras["log"][f"Metrics/hlip_clf/upper_body_joint_pos_abs_mean/{name}"] = upper_body_joint_pos_mean[idx]
-          env.extras["log"][f"Metrics/hlip_clf/upper_body_joint_vel_abs_mean/{name}"] = upper_body_joint_vel_mean[idx]
     env.extras["log"]["Metrics/hlip_clf/pelvis_yaw_err_abs_mean"] = torch.mean(
       y_err_abs[:, 5]
     )
