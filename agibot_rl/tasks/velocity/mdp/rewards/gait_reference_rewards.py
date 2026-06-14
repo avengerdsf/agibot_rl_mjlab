@@ -210,6 +210,13 @@ def _log_hlip_single_env_trace(env, command_term) -> None:
     _log_scalar(log, f"{prefix}/command_y", command_value[1])
     _log_scalar(log, f"{prefix}/command_yaw", command_value[2])
 
+  hlip_command = getattr(command_term, "last_hlip_command", None)
+  hlip_command_value = _trace_value(hlip_command, trace_env_id)
+  if hlip_command_value is not None and hlip_command_value.numel() >= 3:
+    _log_scalar(log, f"{prefix}/hlip_command_x", hlip_command_value[0])
+    _log_scalar(log, f"{prefix}/hlip_command_y", hlip_command_value[1])
+    _log_scalar(log, f"{prefix}/hlip_command_yaw", hlip_command_value[2])
+
   robot = getattr(command_term, "robot", None)
   robot_data = getattr(robot, "data", None)
   root_link_lin_vel_b = _trace_value(

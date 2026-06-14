@@ -485,6 +485,7 @@ class HLIPReferenceCommand(CommandTerm):
     )
     self.upper_body_joint_vel = torch.zeros_like(self.upper_body_joint_pos)
     self.last_command = torch.zeros(self.num_envs, 3, device=self.device)
+    self.last_hlip_command = torch.zeros_like(self.last_command)
     self.hlip_trace_env_id = cfg.trace_env_id
     self.v = torch.zeros(self.num_envs, device=self.device)
     self.vdot = torch.zeros_like(self.v)
@@ -617,6 +618,22 @@ class HLIPReferenceCommand(CommandTerm):
     vector_w: torch.Tensor,
   ) -> torch.Tensor:
     return torch.matmul(frame_w.transpose(-1, -2), vector_w.unsqueeze(-1)).squeeze(-1)
+
+  @staticmethod
+  def _command_to_hlip_frame(
+    command_b: torch.Tensor,
+    root_quat_w: torch.Tensor,
+    stance_foot_frame_w: torch.Tensor,
+  ) -> torch.Tensor:
+    command_linear_b = torch.zeros_like(command_b)
+    command_linear_b[:, :2] = command_b[:, :2]
+    command_w = quat_apply(root_quat_w, command_linear_b)
+    command_l = torch.matmul(
+      stance_foot_frame_w.transpose(-1, -2),
+      command_w.unsqueeze(-1),
+    ).squeeze(-1)
+    command_l[:, 2] = command_b[:, 2]
+    return command_l
 
   @staticmethod
   def _frame_to_rpy(frame_w: torch.Tensor) -> torch.Tensor:
@@ -1029,6 +1046,12 @@ class HLIPReferenceCommand(CommandTerm):
   def _update_reference(self) -> None:
     command = self._env.command_manager.get_command(self.cfg.velocity_command_name)
     self.last_command = command.clone()
+    hlip_command = self._command_to_hlip_frame(
+      command,
+      self.robot.data.root_link_quat_w,
+      self.stance_foot_frame_w_0,
+    )
+    self.last_hlip_command = hlip_command.clone()
     foot_pos_b = self._current_foot_pos_b()
     foot_pos_l = self._current_foot_pos_l()
     self._update_phase_state()
@@ -1092,11 +1115,11 @@ class HLIPReferenceCommand(CommandTerm):
     swing_duration = torch.full_like(self.phase_var, 0.5 * self.cfg.reference_period)
 
     self.hlip_x_init, self.hlip_y_init, step_x, step_y_by_foot = self.hlip.compute_orbit(
-      command
+      hlip_command
     )
     step_y = torch.where(left_swing, step_y_by_foot[:, 0], step_y_by_foot[:, 1])
     target_delta_xy = torch.stack((step_x, step_y), dim=1)
-    delta_yaw = command[:, 2] * self.cur_swing_time
+    delta_yaw = hlip_command[:, 2] * self.cur_swing_time
     cos_yaw = torch.cos(delta_yaw)
     sin_yaw = torch.sin(delta_yaw)
     target_delta_xy = torch.stack(
@@ -1230,7 +1253,7 @@ class HLIPReferenceCommand(CommandTerm):
     self.metrics["landing_valid"] = self.last_landing_valid.clone()
     self.metrics["step_x_clipped"] = x_clipped * swing_mask.any(dim=1).float()
     pelvis_rpy_ref, pelvis_rpy_rate_ref = self._pelvis_reference(
-      command,
+      hlip_command,
       self.stance_foot_ori_0[:, 2],
     )
     ref_swing_foot_rpy = torch.zeros_like(pelvis_rpy_ref)
@@ -1239,7 +1262,7 @@ class HLIPReferenceCommand(CommandTerm):
     ref_swing_foot_rpy_rate[:, 2] = pelvis_rpy_rate_ref[:, 2]
     ref_upper_body_joint_pos, ref_upper_body_joint_vel = self._upper_body_reference(command)
     self._update_clf_state(
-      command,
+      hlip_command,
       self.phase,
       left_swing,
       foot_pos_b,
