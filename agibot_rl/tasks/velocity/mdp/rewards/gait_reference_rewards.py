@@ -230,6 +230,15 @@ def _log_hlip_single_env_trace(env, command_term) -> None:
       _log_scalar(log, f"{prefix}/twist_error/x", root_link_lin_vel_b[0] - command_value[0])
       _log_scalar(log, f"{prefix}/twist_error/y", root_link_lin_vel_b[1] - command_value[1])
 
+  root_link_ang_vel_b = _trace_value(
+    getattr(robot_data, "root_link_ang_vel_b", None),
+    trace_env_id,
+  )
+  if root_link_ang_vel_b is not None and root_link_ang_vel_b.numel() >= 3:
+    _log_scalar(log, f"{prefix}/root_link_ang_vel_b/z", root_link_ang_vel_b[2])
+    if command_value is not None and command_value.numel() >= 3:
+      _log_scalar(log, f"{prefix}/twist_error/yaw", root_link_ang_vel_b[2] - command_value[2])
+
   root_com_vel_w = _trace_value(
     getattr(robot_data, "root_com_vel_w", None),
     trace_env_id,
