@@ -414,7 +414,7 @@ def agibot_x1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
 
   cfg.rewards["body_height_l2"] = RewardTermCfg(
     func=mdp.body_height_l2,
-    weight=-0.2,
+    weight=-0.8,
     params={
       "target_height": 0.61,
       "std": 0.08,
