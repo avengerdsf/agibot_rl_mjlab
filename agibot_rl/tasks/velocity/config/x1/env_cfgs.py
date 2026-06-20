@@ -233,14 +233,10 @@ def agibot_x1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     hlip_com_height=0.61,
     hlip_double_support_time=(contact_phase_threshold - 0.5) * gait_period,
     hlip_step_width=0.26,
-    velocity_feedback_gains=(0.25, 0.15, 0.30),
-    max_command_delta=(0.15, 0.10, 0.25),
+    yaw_feedback_gains=(1.0, 0.2),
+    max_yaw_command_delta=0.25,
     feedback_alpha=0.2,
-    command_limits=(
-      twist_cmd.ranges.lin_vel_x,
-      twist_cmd.ranges.lin_vel_y,
-      twist_cmd.ranges.ang_vel_z,
-    ),
+    yaw_command_limit=twist_cmd.ranges.ang_vel_z,
   )
 
   cfg.events["foot_friction"].params["asset_cfg"] = SceneEntityCfg(
