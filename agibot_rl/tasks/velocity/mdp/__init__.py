@@ -8,6 +8,7 @@ from .terminations import *  # noqa: F403
 from .commands.base_command import *  # noqa: F403
 from .commands.gait_phase_command import *  # noqa: F403
 from .commands.gait_reference_command import *  # noqa: F403
+from .commands.hlip_feedback_reference_command import *  # noqa: F403
 from .commands.hlip_reference_command import *  # noqa: F403
 
 from .metric import * # noqa: F403
