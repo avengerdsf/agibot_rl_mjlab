@@ -156,6 +156,16 @@ def _log_mean(log: dict[str, torch.Tensor], key: str, value: torch.Tensor | None
     log[key] = torch.mean(value.detach())
 
 
+def _log_mean_abs(log: dict[str, torch.Tensor], key: str, value: torch.Tensor | None) -> None:
+  if isinstance(value, torch.Tensor):
+    log[key] = torch.mean(torch.abs(value.detach()))
+
+
+def _log_rms(log: dict[str, torch.Tensor], key: str, value: torch.Tensor | None) -> None:
+  if isinstance(value, torch.Tensor):
+    log[key] = torch.sqrt(torch.mean(torch.square(value.detach())))
+
+
 def _trace_value(
   value: torch.Tensor | None,
   env_id: int,
@@ -218,6 +228,7 @@ def _log_hlip_single_env_trace(env, command_term) -> None:
     _log_mean(log, "Metrics/hlip_trace/mean/command_x", command[:, 0])
     _log_mean(log, "Metrics/hlip_trace/mean/command_y", command[:, 1])
     _log_mean(log, "Metrics/hlip_trace/mean/command_yaw", command[:, 2])
+    _log_mean_abs(log, "Metrics/hlip_trace/mean_abs/command_yaw", command[:, 2])
 
   hlip_command = getattr(command_term, "last_hlip_command", None)
   hlip_command_value = _trace_value(hlip_command, trace_env_id)
@@ -229,6 +240,7 @@ def _log_hlip_single_env_trace(env, command_term) -> None:
     _log_mean(log, "Metrics/hlip_trace/mean/hlip_command_x", hlip_command[:, 0])
     _log_mean(log, "Metrics/hlip_trace/mean/hlip_command_y", hlip_command[:, 1])
     _log_mean(log, "Metrics/hlip_trace/mean/hlip_command_yaw", hlip_command[:, 2])
+    _log_mean_abs(log, "Metrics/hlip_trace/mean_abs/hlip_command_yaw", hlip_command[:, 2])
 
   robot = getattr(command_term, "robot", None)
   robot_data = getattr(robot, "data", None)
@@ -250,9 +262,17 @@ def _log_hlip_single_env_trace(env, command_term) -> None:
   ):
     _log_mean(log, "Metrics/hlip_trace/mean/root_link_vel_b/x", root_link_lin_vel_b_all[:, 0])
     _log_mean(log, "Metrics/hlip_trace/mean/root_link_vel_b/y", root_link_lin_vel_b_all[:, 1])
+    _log_mean_abs(log, "Metrics/hlip_trace/mean_abs/root_link_vel_b/x", root_link_lin_vel_b_all[:, 0])
+    _log_mean_abs(log, "Metrics/hlip_trace/mean_abs/root_link_vel_b/y", root_link_lin_vel_b_all[:, 1])
     if isinstance(command, torch.Tensor) and command.shape[0] == root_link_lin_vel_b_all.shape[0]:
-      _log_mean(log, "Metrics/hlip_trace/mean/twist_error/x", root_link_lin_vel_b_all[:, 0] - command[:, 0])
-      _log_mean(log, "Metrics/hlip_trace/mean/twist_error/y", root_link_lin_vel_b_all[:, 1] - command[:, 1])
+      twist_error_x = root_link_lin_vel_b_all[:, 0] - command[:, 0]
+      twist_error_y = root_link_lin_vel_b_all[:, 1] - command[:, 1]
+      _log_mean(log, "Metrics/hlip_trace/mean/twist_error/x", twist_error_x)
+      _log_mean(log, "Metrics/hlip_trace/mean/twist_error/y", twist_error_y)
+      _log_mean_abs(log, "Metrics/hlip_trace/mean_abs/twist_error/x", twist_error_x)
+      _log_mean_abs(log, "Metrics/hlip_trace/mean_abs/twist_error/y", twist_error_y)
+      _log_rms(log, "Metrics/hlip_trace/rms/twist_error/x", twist_error_x)
+      _log_rms(log, "Metrics/hlip_trace/rms/twist_error/y", twist_error_y)
 
   root_link_ang_vel_b_all = getattr(robot_data, "root_link_ang_vel_b", None)
   root_link_ang_vel_b = _trace_value(
@@ -269,8 +289,13 @@ def _log_hlip_single_env_trace(env, command_term) -> None:
     and root_link_ang_vel_b_all.shape[1] >= 3
   ):
     _log_mean(log, "Metrics/hlip_trace/mean/root_link_ang_vel_b/z", root_link_ang_vel_b_all[:, 2])
+    _log_mean_abs(log, "Metrics/hlip_trace/mean_abs/root_link_ang_vel_b/z", root_link_ang_vel_b_all[:, 2])
+    _log_rms(log, "Metrics/hlip_trace/rms/root_link_ang_vel_b/z", root_link_ang_vel_b_all[:, 2])
     if isinstance(command, torch.Tensor) and command.shape[0] == root_link_ang_vel_b_all.shape[0]:
-      _log_mean(log, "Metrics/hlip_trace/mean/twist_error/yaw", root_link_ang_vel_b_all[:, 2] - command[:, 2])
+      twist_error_yaw = root_link_ang_vel_b_all[:, 2] - command[:, 2]
+      _log_mean(log, "Metrics/hlip_trace/mean/twist_error/yaw", twist_error_yaw)
+      _log_mean_abs(log, "Metrics/hlip_trace/mean_abs/twist_error/yaw", twist_error_yaw)
+      _log_rms(log, "Metrics/hlip_trace/rms/twist_error/yaw", twist_error_yaw)
 
   root_com_vel_w = _trace_value(
     getattr(robot_data, "root_com_vel_w", None),
@@ -286,7 +311,10 @@ def _log_hlip_single_env_trace(env, command_term) -> None:
     _log_scalar(log, f"{prefix}/com_vel_error/{axis}", dy_act[trace_env_id, idx] - dy_ref[trace_env_id, idx])
     _log_mean(log, f"Metrics/hlip_trace/mean/com_act/vel_{axis}", dy_act[:, idx])
     _log_mean(log, f"Metrics/hlip_trace/mean/com_ref/vel_{axis}", dy_ref[:, idx])
-    _log_mean(log, f"Metrics/hlip_trace/mean/com_vel_error/{axis}", dy_act[:, idx] - dy_ref[:, idx])
+    com_vel_error = dy_act[:, idx] - dy_ref[:, idx]
+    _log_mean(log, f"Metrics/hlip_trace/mean/com_vel_error/{axis}", com_vel_error)
+    _log_mean_abs(log, f"Metrics/hlip_trace/mean_abs/com_vel_error/{axis}", com_vel_error)
+    _log_rms(log, f"Metrics/hlip_trace/rms/com_vel_error/{axis}", com_vel_error)
 
   metrics = getattr(command_term, "metrics", {})
   metric_names = (
