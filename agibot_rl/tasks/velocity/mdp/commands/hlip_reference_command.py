@@ -918,7 +918,11 @@ class HLIPReferenceCommand(CommandTerm):
       torch.arange(self.num_envs, device=self.device),
       swing_indices,
     ]
-    swing_foot_rpy = self._frame_to_rpy(swing_foot_frame_w)
+    swing_foot_frame_l = torch.matmul(
+      self.stance_foot_frame_w_0.transpose(-1, -2),
+      swing_foot_frame_w,
+    )
+    swing_foot_rpy = self._frame_to_rpy(swing_foot_frame_l)
     swing_foot_ang_vel_w = self.robot.data.body_link_ang_vel_w[
       :, self.foot_body_ids_tensor, :
     ][
@@ -1257,7 +1261,9 @@ class HLIPReferenceCommand(CommandTerm):
       self.stance_foot_ori_0[:, 2],
     )
     ref_swing_foot_rpy = torch.zeros_like(pelvis_rpy_ref)
-    ref_swing_foot_rpy[:, 2] = pelvis_rpy_ref[:, 2]
+    ref_swing_foot_rpy[:, 2] = wrap_to_pi(
+      pelvis_rpy_ref[:, 2] - self.stance_foot_ori_0[:, 2]
+    )
     ref_swing_foot_rpy_rate = torch.zeros_like(ref_swing_foot_rpy)
     ref_swing_foot_rpy_rate[:, 2] = pelvis_rpy_rate_ref[:, 2]
     ref_upper_body_joint_pos, ref_upper_body_joint_vel = self._upper_body_reference(command)
