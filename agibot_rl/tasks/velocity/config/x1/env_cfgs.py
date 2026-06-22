@@ -386,6 +386,16 @@ def agibot_x1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       "command_name": "hlip_ref_feedback",
     },
   )
+  cfg.rewards["hlip_yaw_rate_error"] = RewardTermCfg(
+    func=mdp.hlip_yaw_rate_error,
+    weight=-0.2,
+    params={
+      "command_name": "hlip_ref_feedback",
+      "pelvis_weight": 1.0,
+      "swing_weight": 0.25,
+      "max_penalty": 4.0,
+    },
+  )
   cfg.rewards["hlip_holonomic_constraint"] = RewardTermCfg(
     func=mdp.holonomic_constraint,
     weight=2.0,
