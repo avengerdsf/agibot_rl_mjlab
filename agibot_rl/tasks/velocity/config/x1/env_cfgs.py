@@ -392,7 +392,7 @@ def agibot_x1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     params={
       "command_name": "hlip_ref_feedback",
       "pelvis_weight": 1.0,
-      "swing_weight": 0.25,
+      "swing_weight": 0.5,
       "max_penalty": 4.0,
     },
   )
