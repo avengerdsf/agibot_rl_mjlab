@@ -11,7 +11,6 @@ from mjlab.managers.metrics_manager import MetricsTermCfg
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.managers.termination_manager import TerminationTermCfg
 from mjlab.sensor import ContactMatch, ContactSensorCfg, RayCastSensorCfg
-import torch
 from agibot_rl.assets.robots import X1_ACTION_SCALE, get_x1_robot_cfg
 from agibot_rl.tasks.velocity.human_base_env_cfg import POLICY_JOINTS_NAMES, make_velocity_env_cfg
 from agibot_rl.tasks.velocity import mdp
@@ -19,7 +18,7 @@ from agibot_rl.tasks.velocity.mdp.commands.base_command import UniformVelocityCo
 from agibot_rl.tasks.velocity.mdp.commands.gait_phase_command import GaitPhaseCommandCfg
 from agibot_rl.tasks.velocity.mdp.commands.hlip_feedback_reference_command import FeedbackHLIPReferenceCommandCfg
 from agibot_rl.tasks.velocity.mdp.commands.hlip_reference_command import HLIPReferenceCommandCfg
-from mjlab.managers.observation_manager import ObservationGroupCfg, ObservationTermCfg
+from mjlab.managers.observation_manager import ObservationTermCfg
 
 
 X1_FOOT_COLLISION_GEOMS = (
@@ -40,81 +39,6 @@ X1_FOOT_COLLISION_GEOMS = (
 )
 X1_FOOT_SITES = ("left_foot", "right_foot")
 X1_FOOT_BODIES = ("link_left_ankle_roll", "link_right_ankle_roll")
-
-def stacked_term_obs(
-    env,
-    term,
-    history_length: int,
-    buffer_name: str,
-) -> torch.Tensor:
-  """对单个 ObservationTermCfg 做历史堆叠，保留默认表格的 term 展开显示。"""
-
-  obs_now = term.func(env, **(term.params or {}))
-
-  if term.scale is not None:
-    obs_now = obs_now * term.scale
-
-  obs_now = obs_now.reshape(obs_now.shape[0], -1)
-
-  step_name = f"{buffer_name}_step"
-  step_now = env.episode_length_buf.clone()
-
-  if not hasattr(env, buffer_name) or not hasattr(env, step_name):
-    buffer = obs_now.unsqueeze(1).repeat(1, history_length, 1)
-    setattr(env, buffer_name, buffer)
-    setattr(env, step_name, step_now)
-    return buffer.reshape(obs_now.shape[0], -1)
-
-  buffer = getattr(env, buffer_name)
-  last_step = getattr(env, step_name)
-
-  shape_changed = (
-      buffer.shape[0] != obs_now.shape[0]
-      or buffer.shape[1] != history_length
-      or buffer.shape[2] != obs_now.shape[1]
-      or last_step.shape[0] != step_now.shape[0]
-  )
-
-  if shape_changed:
-    buffer = obs_now.unsqueeze(1).repeat(1, history_length, 1)
-    setattr(env, buffer_name, buffer)
-    setattr(env, step_name, step_now)
-    return buffer.reshape(obs_now.shape[0], -1)
-
-  update_mask = step_now != last_step
-  reset_mask = step_now == 0
-
-  if torch.any(update_mask):
-    updated = torch.roll(buffer[update_mask], shifts=1, dims=1)
-    updated[:, 0, :] = obs_now[update_mask]
-    buffer[update_mask] = updated
-
-  if torch.any(reset_mask):
-    buffer[reset_mask] = obs_now[reset_mask].unsqueeze(1).repeat(1, history_length, 1)
-
-  setattr(env, buffer_name, buffer)
-  setattr(env, step_name, step_now)
-
-  return buffer.reshape(obs_now.shape[0], -1)
-
-def stack_observation_terms(
-    terms: dict,
-    history_length: int,
-    group_name: str,
-) -> dict:
-  """把一组 ObservationTermCfg 改成逐项历史堆叠。"""
-
-  return {
-    name: ObservationTermCfg(
-      func=stacked_term_obs,
-      params={
-        "term": term,
-        "history_length": history_length,
-        "buffer_name": f"_{group_name}_{name}_history",
-      },
-    )
-    for name, term in terms.items()
-  }
 
 def agibot_x1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   cfg = make_velocity_env_cfg()
@@ -297,19 +221,6 @@ def agibot_x1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   cfg.observations["critic"].terms["foot_vel"] = ObservationTermCfg(
     func=mdp.foot_vel,
     params={"asset_cfg": foot_body_cfg()},
-  )
-  obs_history_length = 8
-
-  cfg.observations["actor"].terms = stack_observation_terms(
-    terms=cfg.observations["actor"].terms,
-    history_length=obs_history_length,
-    group_name="actor",
-  )
-
-  cfg.observations["critic"].terms = stack_observation_terms(
-    terms=cfg.observations["critic"].terms,
-    history_length=obs_history_length,
-    group_name="critic",
   )
 
   cfg.observations["actor"].history_length = 1
