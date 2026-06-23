@@ -391,9 +391,10 @@ def agibot_x1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     weight=-1.0,
     params={
       "command_name": "hlip_ref_feedback",
-      "pelvis_weight": 1.0,
-      "swing_weight": 0.5,
-      "max_penalty": 4.0,
+      "root_weight": 1.0,
+      "pelvis_weight": 0.5,
+      "swing_weight": 0.1,
+      "max_penalty": 2.0,
     },
   )
   cfg.rewards["hlip_holonomic_constraint"] = RewardTermCfg(

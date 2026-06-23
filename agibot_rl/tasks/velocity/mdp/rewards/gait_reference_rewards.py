@@ -435,21 +435,30 @@ def hlip_upper_body_vel_error(
 def hlip_yaw_rate_error(
   env,
   command_name: str,
+  root_weight: float,
   pelvis_weight: float,
   swing_weight: float,
   max_penalty: float,
 ) -> torch.Tensor:
   command_term = env.command_manager.get_term(command_name)
+  root_error = (
+    command_term.robot.data.root_link_ang_vel_b[:, 2]
+    - command_term.last_command[:, 2]
+  )
   yaw_rate_error = command_term.dy_act[:, [5, 11]] - command_term.dy_out[:, [5, 11]]
   pelvis_error = yaw_rate_error[:, 0]
   swing_error = yaw_rate_error[:, 1]
   penalty = (
-    pelvis_weight * torch.square(pelvis_error)
+    root_weight * torch.square(root_error)
+    + pelvis_weight * torch.square(pelvis_error)
     + swing_weight * torch.square(swing_error)
   )
   penalty = torch.clamp(penalty, max=max_penalty)
 
   env.extras.setdefault("log", {})
+  env.extras["log"]["Metrics/hlip_yaw_rate_error/root_abs_mean"] = torch.mean(
+    torch.abs(root_error)
+  )
   env.extras["log"]["Metrics/hlip_yaw_rate_error/pelvis_abs_mean"] = torch.mean(
     torch.abs(pelvis_error)
   )
