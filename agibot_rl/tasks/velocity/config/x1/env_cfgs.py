@@ -233,8 +233,9 @@ def agibot_x1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     hlip_com_height=0.61,
     hlip_double_support_time=(contact_phase_threshold - 0.5) * gait_period,
     hlip_step_width=0.26,
-    yaw_feedback_gains=(1.0, 0.2),
+    yaw_feedback_gains=(1.0, 0.5),
     max_yaw_reference_delta=0.25,
+    max_yaw_rate_reference_delta=0.6,
     feedback_alpha=0.2,
   )
 

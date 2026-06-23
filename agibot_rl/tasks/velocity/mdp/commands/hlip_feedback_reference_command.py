@@ -20,18 +20,23 @@ class FeedbackHLIPReferenceCommand(HLIPReferenceCommand):
     super().__init__(cfg, env)
     self.yaw_ref_w = self.robot.data.heading_w.clone()
     self.yaw_reference_delta = torch.zeros(self.num_envs, device=self.device)
+    self.yaw_rate_reference_delta = torch.zeros(self.num_envs, device=self.device)
     self.metrics["feedback_delta_yaw"] = torch.zeros(self.num_envs, device=self.device)
+    self.metrics["feedback_delta_yaw_rate"] = torch.zeros(self.num_envs, device=self.device)
     self.metrics["feedback_yaw_error"] = torch.zeros(self.num_envs, device=self.device)
+    self.metrics["feedback_yaw_rate_error"] = torch.zeros(self.num_envs, device=self.device)
     self.metrics["feedback_yaw_ref"] = torch.zeros(self.num_envs, device=self.device)
 
   def _resample_command(self, env_ids: torch.Tensor) -> None:
     super()._resample_command(env_ids)
     self.yaw_ref_w[env_ids] = self.robot.data.heading_w[env_ids]
     self.yaw_reference_delta[env_ids] = 0.0
+    self.yaw_rate_reference_delta[env_ids] = 0.0
 
   def _update_metrics(self) -> None:
     super()._update_metrics()
     self.metrics["feedback_delta_yaw"] = self.yaw_reference_delta
+    self.metrics["feedback_delta_yaw_rate"] = self.yaw_rate_reference_delta
     self.metrics["feedback_yaw_ref"] = self.yaw_ref_w
 
   def _command_to_hlip_frame(
@@ -59,6 +64,9 @@ class FeedbackHLIPReferenceCommand(HLIPReferenceCommand):
     pelvis_rpy_ref[:, 2] = wrap_to_pi(
       pelvis_rpy_ref[:, 2] + self.yaw_reference_delta
     )
+    pelvis_rpy_rate_ref[:, 2] = (
+      pelvis_rpy_rate_ref[:, 2] + self.yaw_rate_reference_delta
+    )
     return pelvis_rpy_ref, pelvis_rpy_rate_ref
 
   def _update_global_yaw_feedback(self, command_b: torch.Tensor) -> None:
@@ -77,26 +85,35 @@ class FeedbackHLIPReferenceCommand(HLIPReferenceCommand):
     )[:, 2]
     yaw_error = wrap_to_pi(self.yaw_ref_w - actual_yaw)
     yaw_rate_error = command_b[:, 2] - actual_yaw_rate
-    target_delta = (
-      self.cfg.yaw_feedback_gains[0] * yaw_error
-      + self.cfg.yaw_feedback_gains[1] * yaw_rate_error
-    )
-    target_delta = torch.clamp(
-      target_delta,
+    target_yaw_delta = self.cfg.yaw_feedback_gains[0] * yaw_error
+    target_yaw_rate_delta = self.cfg.yaw_feedback_gains[1] * yaw_rate_error
+    target_yaw_delta = torch.clamp(
+      target_yaw_delta,
       min=-self.cfg.max_yaw_reference_delta,
       max=self.cfg.max_yaw_reference_delta,
     )
+    target_yaw_rate_delta = torch.clamp(
+      target_yaw_rate_delta,
+      min=-self.cfg.max_yaw_rate_reference_delta,
+      max=self.cfg.max_yaw_rate_reference_delta,
+    )
     self.yaw_reference_delta = (
       (1.0 - self.cfg.feedback_alpha) * self.yaw_reference_delta
-      + self.cfg.feedback_alpha * target_delta
+      + self.cfg.feedback_alpha * target_yaw_delta
+    )
+    self.yaw_rate_reference_delta = (
+      (1.0 - self.cfg.feedback_alpha) * self.yaw_rate_reference_delta
+      + self.cfg.feedback_alpha * target_yaw_rate_delta
     )
     self.metrics["feedback_yaw_error"] = yaw_error
+    self.metrics["feedback_yaw_rate_error"] = yaw_rate_error
 
 
 @dataclass(kw_only=True)
 class FeedbackHLIPReferenceCommandCfg(HLIPReferenceCommandCfg):
   yaw_feedback_gains: tuple[float, float] = (1.0, 0.2)
   max_yaw_reference_delta: float = 0.25
+  max_yaw_rate_reference_delta: float = 0.6
   feedback_alpha: float = 0.2
 
   def build(self, env) -> FeedbackHLIPReferenceCommand:
