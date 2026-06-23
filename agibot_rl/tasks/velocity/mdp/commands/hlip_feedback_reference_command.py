@@ -35,11 +35,6 @@ class FeedbackHLIPReferenceCommand(HLIPReferenceCommand):
     self.step_velocity_feedback_delta = torch.zeros(self.num_envs, 2, device=self.device)
     self.metrics["feedback_delta_yaw"] = torch.zeros(self.num_envs, device=self.device)
     self.metrics["feedback_delta_yaw_rate"] = torch.zeros(self.num_envs, device=self.device)
-    self.metrics["feedback_yaw_error"] = torch.zeros(self.num_envs, device=self.device)
-    self.metrics["feedback_yaw_rate_error"] = torch.zeros(self.num_envs, device=self.device)
-    self.metrics["feedback_yaw_ref"] = torch.zeros(self.num_envs, device=self.device)
-    self.metrics["feedback_step_velocity_error_x"] = torch.zeros(self.num_envs, device=self.device)
-    self.metrics["feedback_step_velocity_error_y"] = torch.zeros(self.num_envs, device=self.device)
     self.metrics["feedback_step_delta_x"] = torch.zeros(self.num_envs, device=self.device)
     self.metrics["feedback_step_delta_y"] = torch.zeros(self.num_envs, device=self.device)
 
@@ -55,9 +50,6 @@ class FeedbackHLIPReferenceCommand(HLIPReferenceCommand):
     super()._update_metrics()
     self.metrics["feedback_delta_yaw"] = self.yaw_reference_delta
     self.metrics["feedback_delta_yaw_rate"] = self.yaw_rate_reference_delta
-    self.metrics["feedback_yaw_ref"] = self.yaw_ref_w
-    self.metrics["feedback_step_velocity_error_x"] = self.step_velocity_error_l[:, 0]
-    self.metrics["feedback_step_velocity_error_y"] = self.step_velocity_error_l[:, 1]
     self.metrics["feedback_step_delta_x"] = self.step_velocity_feedback_delta[:, 0]
     self.metrics["feedback_step_delta_y"] = self.step_velocity_feedback_delta[:, 1]
 
@@ -164,8 +156,6 @@ class FeedbackHLIPReferenceCommand(HLIPReferenceCommand):
       (1.0 - self.cfg.feedback_alpha) * self.yaw_rate_reference_delta
       + self.cfg.feedback_alpha * target_yaw_rate_delta
     )
-    self.metrics["feedback_yaw_error"] = yaw_error
-    self.metrics["feedback_yaw_rate_error"] = yaw_rate_error
 
 
 @dataclass(kw_only=True)

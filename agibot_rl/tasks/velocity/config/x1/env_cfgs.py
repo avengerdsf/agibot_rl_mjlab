@@ -461,6 +461,14 @@ def agibot_x1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       "asset_cfg": SceneEntityCfg("robot", body_names=("x1-body",))
       },
   )
+  cfg.metrics["velocity_tracking_diagnostics"] = MetricsTermCfg(
+    func=mdp.velocity_tracking_diagnostics,
+    params={
+      "command_name": "hlip_ref_feedback",
+      "yaw_zero_threshold": 0.05,
+      "asset_cfg": SceneEntityCfg("robot", body_names=("x1-body",)),
+    },
+  )
 
   cfg.events["base_com"].params["asset_cfg"].body_names = ("x1-body",)
 
