@@ -619,6 +619,13 @@ class HLIPReferenceCommand(CommandTerm):
   ) -> torch.Tensor:
     return torch.matmul(frame_w.transpose(-1, -2), vector_w.unsqueeze(-1)).squeeze(-1)
 
+  def _apply_step_velocity_feedback(
+    self,
+    target_delta_xy: torch.Tensor,
+    swing_mask: torch.Tensor,
+  ) -> torch.Tensor:
+    return target_delta_xy
+
   @staticmethod
   def _command_to_hlip_frame(
     command_b: torch.Tensor,
@@ -1132,6 +1139,10 @@ class HLIPReferenceCommand(CommandTerm):
         sin_yaw * target_delta_xy[:, 0] + cos_yaw * target_delta_xy[:, 1],
       ),
       dim=1,
+    )
+    target_delta_xy = self._apply_step_velocity_feedback(
+      target_delta_xy,
+      swing_mask,
     )
     target_delta_xy_raw = target_delta_xy.clone()
     target_delta_xy[:, 0] = torch.clamp(

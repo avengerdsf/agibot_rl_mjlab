@@ -236,6 +236,8 @@ def agibot_x1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     yaw_feedback_gains=(1.0, 0.5),
     max_yaw_reference_delta=0.25,
     max_yaw_rate_reference_delta=0.6,
+    step_velocity_feedback_gains=(0.15, 0.10),
+    max_step_velocity_feedback=(0.06, 0.04),
     feedback_alpha=0.2,
   )
 
