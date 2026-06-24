@@ -297,17 +297,7 @@ def agibot_x1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       "command_name": "hlip_ref_feedback",
     },
   )
-  cfg.rewards["hlip_yaw_rate_error"] = RewardTermCfg(
-    func=mdp.hlip_yaw_rate_error,
-    weight=-1.0,
-    params={
-      "command_name": "hlip_ref_feedback",
-      "root_weight": 1.0,
-      "pelvis_weight": 0.5,
-      "swing_weight": 0.1,
-      "max_penalty": 2.0,
-    },
-  )
+  cfg.rewards["hlip_yaw_rate_error"] = None
   cfg.rewards["hlip_holonomic_constraint"] = RewardTermCfg(
     func=mdp.holonomic_constraint,
     weight=1.0,
@@ -433,20 +423,7 @@ def agibot_x1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       "log_prefix": "Metrics/x1_joint_vel_l2",
     },
   )
-  cfg.rewards["swing_leg_yaw_roll_vel_l2"] = RewardTermCfg(
-    func=mdp.swing_leg_yaw_roll_vel_l2,
-    weight=-0.02,
-    params={
-      "asset_cfg": SceneEntityCfg("robot"),
-      "command_name": "hlip_ref_feedback",
-      "joint_weights": {
-        "hip_yaw": 1.0,
-        "hip_roll": 1.0,
-        "ankle_roll": 0.5,
-      },
-      "log_prefix": "Metrics/swing_leg_yaw_roll_vel_l2",
-    },
-  )
+  cfg.rewards["swing_leg_yaw_roll_vel_l2"] = None
   fixed_joint_names = (
     "lumbar_roll_.*",
     "lumbar_pitch_.*",
