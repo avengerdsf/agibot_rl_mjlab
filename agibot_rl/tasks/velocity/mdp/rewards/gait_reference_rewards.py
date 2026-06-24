@@ -161,6 +161,107 @@ def _log_mean_abs(log: dict[str, torch.Tensor], key: str, value: torch.Tensor | 
     log[key] = torch.mean(torch.abs(value.detach()))
 
 
+def _matching_action_ids(target_names: tuple[str, ...] | list[str], patterns: tuple[str, ...]) -> list[int]:
+  return [
+    idx
+    for idx, name in enumerate(target_names)
+    if any(re.fullmatch(pattern, name) for pattern in patterns)
+  ]
+
+
+def _side_mean_abs(
+  values: torch.Tensor,
+  left_ids: list[int],
+  right_ids: list[int],
+) -> tuple[torch.Tensor, torch.Tensor] | None:
+  if not left_ids or not right_ids:
+    return None
+  left = torch.mean(torch.abs(values[:, left_ids]), dim=1)
+  right = torch.mean(torch.abs(values[:, right_ids]), dim=1)
+  return left, right
+
+
+def _select_side_value(
+  left: torch.Tensor,
+  right: torch.Tensor,
+  side_idx: torch.Tensor,
+) -> torch.Tensor:
+  return torch.where(side_idx == 0, left, right)
+
+
+def _log_swing_yaw_source_diagnostics(env, command_term, log: dict[str, torch.Tensor]) -> None:
+  dy_act = getattr(command_term, "dy_act", None)
+  dy_out = getattr(command_term, "dy_out", None)
+  swing_idx = getattr(command_term, "swing_idx", None)
+  stance_idx = getattr(command_term, "stance_idx", None)
+  robot = getattr(command_term, "robot", None)
+  if (
+    not isinstance(dy_act, torch.Tensor)
+    or not isinstance(dy_out, torch.Tensor)
+    or dy_act.dim() != 2
+    or dy_out.shape != dy_act.shape
+    or dy_act.shape[1] <= 11
+    or not isinstance(swing_idx, torch.Tensor)
+    or not isinstance(stance_idx, torch.Tensor)
+    or robot is None
+    or not hasattr(robot, "find_joints")
+  ):
+    return
+
+  prefix = "Metrics/hlip_swing_yaw_source"
+  log[f"{prefix}/swing_foot_yaw_rate_actual_abs_mean"] = torch.mean(torch.abs(dy_act[:, 11]))
+  log[f"{prefix}/swing_foot_yaw_rate_ref_abs_mean"] = torch.mean(torch.abs(dy_out[:, 11]))
+  log[f"{prefix}/swing_foot_yaw_rate_error_abs_mean"] = torch.mean(
+    torch.abs(dy_act[:, 11] - dy_out[:, 11])
+  )
+
+  groups = (
+    ("hip_yaw", ("left_hip_yaw_.*",), ("right_hip_yaw_.*",)),
+    ("hip_roll", ("left_hip_roll_.*",), ("right_hip_roll_.*",)),
+    ("ankle_roll", ("left_ankle_roll_.*",), ("right_ankle_roll_.*",)),
+  )
+  joint_vel = getattr(getattr(robot, "data", None), "joint_vel", None)
+  if isinstance(joint_vel, torch.Tensor):
+    for group_name, left_patterns, right_patterns in groups:
+      left_ids, _ = robot.find_joints(left_patterns)
+      right_ids, _ = robot.find_joints(right_patterns)
+      side_values = _side_mean_abs(joint_vel, left_ids, right_ids)
+      if side_values is None:
+        continue
+      left, right = side_values
+      log[f"{prefix}/{group_name}/swing_joint_vel_abs_mean"] = torch.mean(
+        _select_side_value(left, right, swing_idx)
+      )
+      log[f"{prefix}/{group_name}/stance_joint_vel_abs_mean"] = torch.mean(
+        _select_side_value(left, right, stance_idx)
+      )
+
+  action_manager = getattr(env, "action_manager", None)
+  if action_manager is None:
+    return
+  try:
+    action_term = action_manager.get_term("joint_pos")
+  except (KeyError, AttributeError):
+    return
+  raw_action = getattr(action_term, "raw_action", None)
+  target_names = getattr(action_term, "target_names", None)
+  if not isinstance(raw_action, torch.Tensor) or target_names is None:
+    return
+  for group_name, left_patterns, right_patterns in groups:
+    left_ids = _matching_action_ids(target_names, left_patterns)
+    right_ids = _matching_action_ids(target_names, right_patterns)
+    side_values = _side_mean_abs(raw_action, left_ids, right_ids)
+    if side_values is None:
+      continue
+    left, right = side_values
+    log[f"{prefix}/{group_name}/swing_action_abs_mean"] = torch.mean(
+      _select_side_value(left, right, swing_idx)
+    )
+    log[f"{prefix}/{group_name}/stance_action_abs_mean"] = torch.mean(
+      _select_side_value(left, right, stance_idx)
+    )
+
+
 def _trace_value(
   value: torch.Tensor | None,
   env_id: int,
@@ -313,6 +414,7 @@ def clf_reward(
     env.extras["log"]["Metrics/hlip_clf/swing_foot_yaw_rate_err_abs_mean"] = torch.mean(
       dy_err_abs[:, 11]
     )
+    _log_swing_yaw_source_diagnostics(env, command_term, env.extras["log"])
   return reward
 
 
