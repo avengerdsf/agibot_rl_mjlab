@@ -115,6 +115,87 @@ class x1_joint_vel_l2:
     return penalty
 
 
+class swing_leg_yaw_roll_vel_l2:
+  def __init__(self, cfg, env):
+    asset_cfg = cfg.params["asset_cfg"]
+    asset = env.scene[asset_cfg.name]
+
+    self.asset_name = asset_cfg.name
+    self.command_name = cfg.params["command_name"]
+    self.log_prefix = cfg.params.get(
+      "log_prefix",
+      "Metrics/swing_leg_yaw_roll_vel_l2",
+    )
+    self.joint_weights = cfg.params.get(
+      "joint_weights",
+      {
+        "hip_yaw": 1.0,
+        "hip_roll": 1.0,
+        "ankle_roll": 0.5,
+      },
+    )
+    self.joint_groups = (
+      ("hip_yaw", ("left_hip_yaw_.*",), ("right_hip_yaw_.*",)),
+      ("hip_roll", ("left_hip_roll_.*",), ("right_hip_roll_.*",)),
+      ("ankle_roll", ("left_ankle_roll_.*",), ("right_ankle_roll_.*",)),
+    )
+    self.left_joint_ids: dict[str, torch.Tensor] = {}
+    self.right_joint_ids: dict[str, torch.Tensor] = {}
+    for group_name, left_patterns, right_patterns in self.joint_groups:
+      left_ids, _ = asset.find_joints(left_patterns)
+      right_ids, _ = asset.find_joints(right_patterns)
+      self.left_joint_ids[group_name] = torch.as_tensor(
+        left_ids,
+        device=env.device,
+        dtype=torch.long,
+      )
+      self.right_joint_ids[group_name] = torch.as_tensor(
+        right_ids,
+        device=env.device,
+        dtype=torch.long,
+      )
+
+  def __call__(
+    self,
+    env,
+    asset_cfg,
+    command_name: str,
+    joint_weights: dict[str, float] | None = None,
+    log_prefix: str = "Metrics/swing_leg_yaw_roll_vel_l2",
+  ) -> torch.Tensor:
+    del asset_cfg, command_name, joint_weights, log_prefix
+
+    asset = env.scene[self.asset_name]
+    command_term = env.command_manager.get_term(self.command_name)
+    swing_idx = command_term.swing_idx
+    joint_vel = asset.data.joint_vel
+    penalty = torch.zeros(env.num_envs, device=env.device, dtype=joint_vel.dtype)
+
+    env.extras.setdefault("log", {})
+    for group_name, _, _ in self.joint_groups:
+      left_ids = self.left_joint_ids[group_name]
+      right_ids = self.right_joint_ids[group_name]
+      if left_ids.numel() == 0 or right_ids.numel() == 0:
+        continue
+
+      left_vel = joint_vel[:, left_ids]
+      right_vel = joint_vel[:, right_ids]
+      left_l2 = torch.mean(torch.square(left_vel), dim=1)
+      right_l2 = torch.mean(torch.square(right_vel), dim=1)
+      selected_l2 = torch.where(swing_idx == 0, left_l2, right_l2)
+      penalty = penalty + float(self.joint_weights[group_name]) * selected_l2
+
+      left_abs = torch.mean(torch.abs(left_vel), dim=1)
+      right_abs = torch.mean(torch.abs(right_vel), dim=1)
+      selected_abs = torch.where(swing_idx == 0, left_abs, right_abs)
+      env.extras["log"][f"{self.log_prefix}/{group_name}_abs_mean"] = torch.mean(
+        selected_abs
+      )
+
+    env.extras["log"][f"{self.log_prefix}/penalty_mean"] = torch.mean(penalty)
+    return penalty
+
+
 def gait_reference_joint_pos(
   env,
   command_name: str,

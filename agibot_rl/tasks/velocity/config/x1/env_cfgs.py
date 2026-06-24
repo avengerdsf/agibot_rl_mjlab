@@ -433,6 +433,20 @@ def agibot_x1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       "log_prefix": "Metrics/x1_joint_vel_l2",
     },
   )
+  cfg.rewards["swing_leg_yaw_roll_vel_l2"] = RewardTermCfg(
+    func=mdp.swing_leg_yaw_roll_vel_l2,
+    weight=-0.02,
+    params={
+      "asset_cfg": SceneEntityCfg("robot"),
+      "command_name": "hlip_ref_feedback",
+      "joint_weights": {
+        "hip_yaw": 1.0,
+        "hip_roll": 1.0,
+        "ankle_roll": 0.5,
+      },
+      "log_prefix": "Metrics/swing_leg_yaw_roll_vel_l2",
+    },
+  )
   fixed_joint_names = (
     "lumbar_roll_.*",
     "lumbar_pitch_.*",
