@@ -632,9 +632,45 @@ class HLIPReferenceCommand(CommandTerm):
     root_quat_w: torch.Tensor,
     stance_foot_frame_w: torch.Tensor,
   ) -> torch.Tensor:
-    del root_quat_w, stance_foot_frame_w
-    return command_b.clone()
+    # 修改1：body frame 线速度 -> world frame
+    lin_b = torch.zeros(command_b.shape[0], 3, device=command_b.device, dtype=command_b.dtype)
+    lin_b[:, 0:2] = command_b[:, 0:2]
+    lin_w = quat_apply(root_quat_w, lin_b)
 
+    # 修改2：world frame 线速度 -> stance HLIP frame
+    lin_l = HLIPReferenceCommand._world_to_hlip_frame(
+      stance_foot_frame_w,
+      lin_w,
+    )
+
+    # 修改3：yaw rate 先保留原值，不在这里强行投影
+    command_l = command_b.clone()
+    command_l[:, 0] = lin_l[:, 0]
+    command_l[:, 1] = lin_l[:, 1]
+    command_l[:, 2] = command_b[:, 2]
+    return command_l
+
+
+  @staticmethod
+  def _yaw_only_frame_w(frame_w: torch.Tensor) -> torch.Tensor:
+    # 修改1：取原 HLIP x 轴在 world xy 平面的投影
+    x_w = frame_w[..., :, 0].clone()
+    x_w[..., 2] = 0.0
+    x_w = x_w / torch.clamp(torch.linalg.norm(x_w, dim=-1, keepdim=True), min=1e-6)
+
+    # 修改2：z 轴固定为 world up
+    z_w = torch.zeros_like(x_w)
+    z_w[..., 2] = 1.0
+
+    # 修改3：右手系 y = z × x
+    y_w = torch.cross(z_w, x_w, dim=-1)
+    y_w = y_w / torch.clamp(torch.linalg.norm(y_w, dim=-1, keepdim=True), min=1e-6)
+
+    # 修改4：重新正交化 x = y × z
+    x_w = torch.cross(y_w, z_w, dim=-1)
+
+    return torch.stack((x_w, y_w, z_w), dim=-1)
+  
   @staticmethod
   def _frame_to_rpy(frame_w: torch.Tensor) -> torch.Tensor:
     roll = torch.atan2(frame_w[..., 2, 1], frame_w[..., 2, 2])
@@ -937,12 +973,15 @@ class HLIPReferenceCommand(CommandTerm):
       swing_foot_rpy,
       swing_foot_omega_b,
     )
+    stance_com_frame_w = self._yaw_only_frame_w(self.stance_foot_frame_w_0)
+
     com_pos_l = self._world_to_hlip_frame(
-      self.stance_foot_frame_w_0,
+      stance_com_frame_w,
       self.robot.data.root_com_pos_w - self.stance_foot_pos_0,
     )
+
     com_vel_l = self._world_to_hlip_frame(
-      self.stance_foot_frame_w_0,
+      stance_com_frame_w,
       self.robot.data.root_com_vel_w[:, 0:3],
     )
     pelvis_rpy = self.pelvis_rpy.clone()
