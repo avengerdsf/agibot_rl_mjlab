@@ -632,15 +632,8 @@ class HLIPReferenceCommand(CommandTerm):
     root_quat_w: torch.Tensor,
     stance_foot_frame_w: torch.Tensor,
   ) -> torch.Tensor:
-    command_linear_b = torch.zeros_like(command_b)
-    command_linear_b[:, :2] = command_b[:, :2]
-    command_w = quat_apply(root_quat_w, command_linear_b)
-    command_l = torch.matmul(
-      stance_foot_frame_w.transpose(-1, -2),
-      command_w.unsqueeze(-1),
-    ).squeeze(-1)
-    command_l[:, 2] = command_b[:, 2]
-    return command_l
+    del root_quat_w, stance_foot_frame_w
+    return command_b.clone()
 
   @staticmethod
   def _frame_to_rpy(frame_w: torch.Tensor) -> torch.Tensor:
