@@ -978,15 +978,9 @@ class HLIPReferenceCommand(CommandTerm):
       torch.arange(self.num_envs, device=self.device),
       swing_indices,
     ]
-    stance_foot_ang_vel_w = self.robot.data.body_link_ang_vel_w[
-      :, self.foot_body_ids_tensor, :
-    ][
-      torch.arange(self.num_envs, device=self.device),
-      self.stance_idx,
-    ]
     swing_foot_omega_b = self._world_to_hlip_frame(
       swing_foot_frame_w,
-      swing_foot_ang_vel_w - stance_foot_ang_vel_w,
+      swing_foot_ang_vel_w,
     )
     swing_foot_rpy_rate = _body_omega_to_rpy_rates(
       swing_foot_rpy,
