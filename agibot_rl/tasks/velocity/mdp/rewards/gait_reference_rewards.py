@@ -270,11 +270,45 @@ def _select_side_value(
   return torch.where(side_idx == 0, left, right)
 
 
+def _abs_corrcoef(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+  a_abs = torch.abs(a.detach()).flatten()
+  b_abs = torch.abs(b.detach()).flatten()
+  if a_abs.numel() < 2 or b_abs.numel() < 2:
+    return torch.zeros((), device=a_abs.device, dtype=a_abs.dtype)
+  a_centered = a_abs - torch.mean(a_abs)
+  b_centered = b_abs - torch.mean(b_abs)
+  denom = torch.linalg.norm(a_centered) * torch.linalg.norm(b_centered)
+  if torch.abs(denom) < 1e-8:
+    return torch.zeros((), device=a_abs.device, dtype=a_abs.dtype)
+  return torch.clamp(torch.sum(a_centered * b_centered) / denom, -1.0, 1.0)
+
+
+def _log_phase_abs_means(
+  log: dict[str, torch.Tensor],
+  prefix: str,
+  phase_var: torch.Tensor,
+  values: dict[str, torch.Tensor],
+) -> None:
+  phase_bins = (
+    ("early", phase_var < (1.0 / 3.0)),
+    ("mid", (phase_var >= (1.0 / 3.0)) & (phase_var < (2.0 / 3.0))),
+    ("late", phase_var >= (2.0 / 3.0)),
+  )
+  for phase_name, mask in phase_bins:
+    if not torch.any(mask):
+      continue
+    for value_name, value in values.items():
+      log[f"{prefix}/phase/{phase_name}/{value_name}_abs_mean"] = torch.mean(
+        torch.abs(value[mask])
+      )
+
+
 def _log_swing_yaw_source_diagnostics(env, command_term, log: dict[str, torch.Tensor]) -> None:
   dy_act = getattr(command_term, "dy_act", None)
   dy_out = getattr(command_term, "dy_out", None)
   swing_idx = getattr(command_term, "swing_idx", None)
   stance_idx = getattr(command_term, "stance_idx", None)
+  phase_var = getattr(command_term, "phase_var", None)
   robot = getattr(command_term, "robot", None)
   if (
     not isinstance(dy_act, torch.Tensor)
@@ -290,11 +324,37 @@ def _log_swing_yaw_source_diagnostics(env, command_term, log: dict[str, torch.Te
     return
 
   prefix = "Metrics/hlip_swing_yaw_source"
-  log[f"{prefix}/swing_foot_yaw_rate_actual_abs_mean"] = torch.mean(torch.abs(dy_act[:, 11]))
-  log[f"{prefix}/swing_foot_yaw_rate_ref_abs_mean"] = torch.mean(torch.abs(dy_out[:, 11]))
-  log[f"{prefix}/swing_foot_yaw_rate_error_abs_mean"] = torch.mean(
-    torch.abs(dy_act[:, 11] - dy_out[:, 11])
+  swing_foot_yaw_rate_actual = dy_act[:, 11]
+  swing_foot_yaw_rate_ref = dy_out[:, 11]
+  swing_foot_yaw_rate_error = swing_foot_yaw_rate_actual - swing_foot_yaw_rate_ref
+  swing_foot_roll_rate_error = dy_act[:, 9] - dy_out[:, 9]
+  pelvis_roll_rate_error = dy_act[:, 3] - dy_out[:, 3]
+  log[f"{prefix}/swing_foot_yaw_rate_actual_abs_mean"] = torch.mean(
+    torch.abs(swing_foot_yaw_rate_actual)
   )
+  log[f"{prefix}/swing_foot_yaw_rate_ref_abs_mean"] = torch.mean(
+    torch.abs(swing_foot_yaw_rate_ref)
+  )
+  log[f"{prefix}/swing_foot_yaw_rate_error_abs_mean"] = torch.mean(
+    torch.abs(swing_foot_yaw_rate_error)
+  )
+  log[f"{prefix}/swing_foot_roll_rate_error_abs_mean"] = torch.mean(
+    torch.abs(swing_foot_roll_rate_error)
+  )
+  log[f"{prefix}/pelvis_roll_rate_error_abs_mean"] = torch.mean(
+    torch.abs(pelvis_roll_rate_error)
+  )
+  if isinstance(phase_var, torch.Tensor) and phase_var.shape[0] == dy_act.shape[0]:
+    _log_phase_abs_means(
+      log,
+      prefix,
+      phase_var,
+      {
+        "swing_foot_yaw_rate_error": swing_foot_yaw_rate_error,
+        "swing_foot_roll_rate_error": swing_foot_roll_rate_error,
+        "pelvis_roll_rate_error": pelvis_roll_rate_error,
+      },
+    )
 
   groups = (
     ("hip_yaw", ("left_hip_yaw_.*",), ("right_hip_yaw_.*",)),
@@ -316,6 +376,10 @@ def _log_swing_yaw_source_diagnostics(env, command_term, log: dict[str, torch.Te
       log[f"{prefix}/{group_name}/stance_joint_vel_abs_mean"] = torch.mean(
         _select_side_value(left, right, stance_idx)
       )
+      log[f"{prefix}/{group_name}/swing_joint_vel_yaw_corr"] = _abs_corrcoef(
+        _select_side_value(left, right, swing_idx),
+        swing_foot_yaw_rate_actual,
+      )
 
   action_manager = getattr(env, "action_manager", None)
   if action_manager is None:
@@ -325,9 +389,13 @@ def _log_swing_yaw_source_diagnostics(env, command_term, log: dict[str, torch.Te
   except (KeyError, AttributeError):
     return
   raw_action = getattr(action_term, "raw_action", None)
+  prev_raw_action = getattr(action_term, "prev_raw_action", None)
   target_names = getattr(action_term, "target_names", None)
   if not isinstance(raw_action, torch.Tensor) or target_names is None:
     return
+  action_delta = None
+  if isinstance(prev_raw_action, torch.Tensor) and prev_raw_action.shape == raw_action.shape:
+    action_delta = raw_action - prev_raw_action
   for group_name, left_patterns, right_patterns in groups:
     left_ids = _matching_action_ids(target_names, left_patterns)
     right_ids = _matching_action_ids(target_names, right_patterns)
@@ -340,6 +408,26 @@ def _log_swing_yaw_source_diagnostics(env, command_term, log: dict[str, torch.Te
     )
     log[f"{prefix}/{group_name}/stance_action_abs_mean"] = torch.mean(
       _select_side_value(left, right, stance_idx)
+    )
+    log[f"{prefix}/{group_name}/swing_action_yaw_corr"] = _abs_corrcoef(
+      _select_side_value(left, right, swing_idx),
+      swing_foot_yaw_rate_actual,
+    )
+    if action_delta is None:
+      continue
+    delta_values = _side_mean_abs(action_delta, left_ids, right_ids)
+    if delta_values is None:
+      continue
+    delta_left, delta_right = delta_values
+    log[f"{prefix}/{group_name}/swing_action_delta_abs_mean"] = torch.mean(
+      _select_side_value(delta_left, delta_right, swing_idx)
+    )
+    log[f"{prefix}/{group_name}/stance_action_delta_abs_mean"] = torch.mean(
+      _select_side_value(delta_left, delta_right, stance_idx)
+    )
+    log[f"{prefix}/{group_name}/swing_action_delta_yaw_corr"] = _abs_corrcoef(
+      _select_side_value(delta_left, delta_right, swing_idx),
+      swing_foot_yaw_rate_actual,
     )
 
 
