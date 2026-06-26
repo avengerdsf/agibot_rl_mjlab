@@ -396,6 +396,14 @@ def _log_swing_yaw_source_diagnostics(env, command_term, log: dict[str, torch.Te
   action_delta = None
   if isinstance(prev_raw_action, torch.Tensor) and prev_raw_action.shape == raw_action.shape:
     action_delta = raw_action - prev_raw_action
+  else:
+    cached_raw_action = getattr(command_term, "_last_hlip_swing_yaw_raw_action", None)
+    if isinstance(cached_raw_action, torch.Tensor) and cached_raw_action.shape == raw_action.shape:
+      action_delta = raw_action - cached_raw_action.to(
+        device=raw_action.device,
+        dtype=raw_action.dtype,
+      )
+  command_term._last_hlip_swing_yaw_raw_action = raw_action.detach().clone()
   for group_name, left_patterns, right_patterns in groups:
     left_ids = _matching_action_ids(target_names, left_patterns)
     right_ids = _matching_action_ids(target_names, right_patterns)
