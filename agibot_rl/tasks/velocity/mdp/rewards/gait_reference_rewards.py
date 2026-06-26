@@ -288,6 +288,7 @@ def _log_phase_abs_means(
   prefix: str,
   phase_var: torch.Tensor,
   values: dict[str, torch.Tensor],
+  valid_mask: torch.Tensor | None = None,
 ) -> None:
   phase_bins = (
     ("early", phase_var < (1.0 / 3.0)),
@@ -295,6 +296,8 @@ def _log_phase_abs_means(
     ("late", phase_var >= (2.0 / 3.0)),
   )
   for phase_name, mask in phase_bins:
+    if valid_mask is not None:
+      mask = mask & valid_mask
     if not torch.any(mask):
       continue
     for value_name, value in values.items():
@@ -329,6 +332,12 @@ def _log_swing_yaw_source_diagnostics(env, command_term, log: dict[str, torch.Te
   swing_foot_yaw_rate_error = swing_foot_yaw_rate_actual - swing_foot_yaw_rate_ref
   swing_foot_roll_rate_error = dy_act[:, 9] - dy_out[:, 9]
   pelvis_roll_rate_error = dy_act[:, 3] - dy_out[:, 3]
+  swing_foot_rpy_rate_fd = getattr(command_term, "swing_foot_rpy_rate_fd", None)
+  swing_foot_rpy_rate_fd_valid = getattr(
+    command_term,
+    "swing_foot_rpy_rate_fd_valid",
+    None,
+  )
   log[f"{prefix}/swing_foot_yaw_rate_actual_abs_mean"] = torch.mean(
     torch.abs(swing_foot_yaw_rate_actual)
   )
@@ -355,6 +364,51 @@ def _log_swing_yaw_source_diagnostics(env, command_term, log: dict[str, torch.Te
         "pelvis_roll_rate_error": pelvis_roll_rate_error,
       },
     )
+
+  if (
+    isinstance(swing_foot_rpy_rate_fd, torch.Tensor)
+    and isinstance(swing_foot_rpy_rate_fd_valid, torch.Tensor)
+    and swing_foot_rpy_rate_fd.shape == (dy_act.shape[0], 3)
+    and swing_foot_rpy_rate_fd_valid.shape[0] == dy_act.shape[0]
+  ):
+    fd_mask = swing_foot_rpy_rate_fd_valid.to(
+      device=dy_act.device,
+      dtype=torch.bool,
+    )
+    log[f"{prefix}/swing_foot_rpy_rate_fd_valid_fraction"] = torch.mean(
+      fd_mask.to(dtype=dy_act.dtype)
+    )
+    if torch.any(fd_mask):
+      fd_rate = swing_foot_rpy_rate_fd.to(device=dy_act.device, dtype=dy_act.dtype)
+      fd_yaw_rate = fd_rate[:, 2]
+      fd_roll_rate = fd_rate[:, 0]
+      fd_yaw_error = swing_foot_yaw_rate_actual - fd_yaw_rate
+      fd_roll_error = dy_act[:, 9] - fd_roll_rate
+      log[f"{prefix}/swing_foot_yaw_rate_fd_abs_mean"] = torch.mean(
+        torch.abs(fd_yaw_rate[fd_mask])
+      )
+      log[f"{prefix}/swing_foot_roll_rate_fd_abs_mean"] = torch.mean(
+        torch.abs(fd_roll_rate[fd_mask])
+      )
+      log[f"{prefix}/swing_foot_yaw_rate_fd_error_abs_mean"] = torch.mean(
+        torch.abs(fd_yaw_error[fd_mask])
+      )
+      log[f"{prefix}/swing_foot_roll_rate_fd_error_abs_mean"] = torch.mean(
+        torch.abs(fd_roll_error[fd_mask])
+      )
+      if isinstance(phase_var, torch.Tensor) and phase_var.shape[0] == dy_act.shape[0]:
+        _log_phase_abs_means(
+          log,
+          prefix,
+          phase_var,
+          {
+            "swing_foot_yaw_rate_fd": fd_yaw_rate,
+            "swing_foot_roll_rate_fd": fd_roll_rate,
+            "swing_foot_yaw_rate_fd_error": fd_yaw_error,
+            "swing_foot_roll_rate_fd_error": fd_roll_error,
+          },
+          valid_mask=fd_mask,
+        )
 
   groups = (
     ("hip_yaw", ("left_hip_yaw_.*",), ("right_hip_yaw_.*",)),

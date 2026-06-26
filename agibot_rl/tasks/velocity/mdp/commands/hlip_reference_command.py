@@ -480,6 +480,15 @@ class HLIPReferenceCommand(CommandTerm):
     self.y_act = torch.zeros_like(self.y_out)
     self.dy_out = torch.zeros_like(self.y_out)
     self.dy_act = torch.zeros_like(self.y_out)
+    self.swing_foot_rpy_rate_fd = torch.zeros(self.num_envs, 3, device=self.device)
+    self.swing_foot_rpy_rate_fd_valid = torch.zeros(
+      self.num_envs,
+      device=self.device,
+      dtype=torch.bool,
+    )
+    self.last_swing_foot_rpy = torch.zeros_like(self.swing_foot_rpy_rate_fd)
+    self.last_swing_foot_rpy_valid = torch.zeros_like(self.swing_foot_rpy_rate_fd_valid)
+    self.last_swing_idx_for_rpy_fd = self.swing_idx.clone()
     self.upper_body_joint_pos = torch.zeros(
       self.num_envs, len(self.upper_body_joint_ids), device=self.device
     )
@@ -515,6 +524,10 @@ class HLIPReferenceCommand(CommandTerm):
     pelvis_rpy = self._current_pelvis_rpy()
     self.foot_rpy[env_ids] = foot_rpy[env_ids]
     self.foot_rpy_rate[env_ids] = 0.0
+    self.swing_foot_rpy_rate_fd[env_ids] = 0.0
+    self.swing_foot_rpy_rate_fd_valid[env_ids] = False
+    self.last_swing_foot_rpy_valid[env_ids] = False
+    self.last_swing_idx_for_rpy_fd[env_ids] = self.swing_idx[env_ids]
     self.pelvis_rpy[env_ids] = pelvis_rpy[env_ids]
     self.pelvis_rpy_rate[env_ids] = 0.0
     self.prev_swing_foot_mask[env_ids] = False
@@ -979,6 +992,29 @@ class HLIPReferenceCommand(CommandTerm):
       swing_foot_rpy,
       swing_foot_omega_b,
     )
+    reset_like = self._env.episode_length_buf.to(self.device) <= 1
+    same_swing = self.last_swing_idx_for_rpy_fd == swing_indices
+    fd_valid = self.last_swing_foot_rpy_valid & same_swing & ~reset_like
+    rpy_delta = wrap_to_pi(swing_foot_rpy - self.last_swing_foot_rpy)
+    step_dt = torch.clamp(
+      torch.full(
+        (self.num_envs, 1),
+        self._env.step_dt,
+        device=self.device,
+        dtype=swing_foot_rpy.dtype,
+      ),
+      min=1e-6,
+    )
+    swing_foot_rpy_rate_fd = rpy_delta / step_dt
+    self.swing_foot_rpy_rate_fd = torch.where(
+      fd_valid.unsqueeze(1),
+      swing_foot_rpy_rate_fd,
+      torch.zeros_like(swing_foot_rpy_rate_fd),
+    )
+    self.swing_foot_rpy_rate_fd_valid = fd_valid
+    self.last_swing_foot_rpy = swing_foot_rpy.detach().clone()
+    self.last_swing_foot_rpy_valid = torch.ones_like(self.last_swing_foot_rpy_valid)
+    self.last_swing_idx_for_rpy_fd = swing_indices.detach().clone()
     stance_com_frame_w = self._yaw_only_frame_w(self.stance_foot_frame_w_0)
 
     com_pos_l = self._world_to_hlip_frame(
