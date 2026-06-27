@@ -647,23 +647,8 @@ class HLIPReferenceCommand(CommandTerm):
     root_quat_w: torch.Tensor,
     stance_foot_frame_w: torch.Tensor,
   ) -> torch.Tensor:
-    # 修改1：body frame 线速度 -> world frame
-    lin_b = torch.zeros(command_b.shape[0], 3, device=command_b.device, dtype=command_b.dtype)
-    lin_b[:, 0:2] = command_b[:, 0:2]
-    lin_w = quat_apply(root_quat_w, lin_b)
-
-    # 修改2：world frame 线速度 -> stance HLIP frame
-    lin_l = HLIPReferenceCommand._world_to_hlip_frame(
-      stance_foot_frame_w,
-      lin_w,
-    )
-
-    # 修改3：yaw rate 先保留原值，不在这里强行投影
-    command_l = command_b.clone()
-    command_l[:, 0] = lin_l[:, 0]
-    command_l[:, 1] = lin_l[:, 1]
-    command_l[:, 2] = command_b[:, 2]
-    return command_l
+    del root_quat_w, stance_foot_frame_w
+    return command_b
 
 
   @staticmethod
