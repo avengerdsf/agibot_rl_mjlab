@@ -497,6 +497,10 @@ class HLIPReferenceCommand(CommandTerm):
     self.last_command = torch.zeros(self.num_envs, 3, device=self.device)
     self.last_hlip_command = torch.zeros_like(self.last_command)
     self.hlip_trace_env_id = cfg.trace_env_id
+    self.debug_vis_num_samples = 21
+    self.debug_vis_line_radius = 0.008
+    self.debug_vis_com_color = (1.0, 0.75, 0.0, 0.9)
+    self.debug_vis_swing_color = (0.8, 0.1, 1.0, 0.9)
     self.v = torch.zeros(self.num_envs, device=self.device)
     self.vdot = torch.zeros_like(self.v)
     self.clf = _ContinuousTimeClf(
@@ -634,22 +638,138 @@ class HLIPReferenceCommand(CommandTerm):
   ) -> torch.Tensor:
     return torch.matmul(frame_w.transpose(-1, -2), vector_w.unsqueeze(-1)).squeeze(-1)
 
-  def _apply_step_velocity_feedback(
+  def _swing_foot_reference_trajectory(
     self,
-    target_delta_xy: torch.Tensor,
-    swing_mask: torch.Tensor,
-  ) -> torch.Tensor:
-    return target_delta_xy
+    phase: torch.Tensor,
+    duration: torch.Tensor,
+    start_pos_l: torch.Tensor,
+    target_pos_l: torch.Tensor,
+  ) -> tuple[torch.Tensor, torch.Tensor]:
+    '''
+    用 Bezier 曲线生成摆动脚参考轨迹。
+    '''
+    horizontal_control = torch.tensor(
+      (0.0, 0.0, 1.0, 1.0, 1.0),
+      device=self.device,
+      dtype=start_pos_l.dtype,
+    ).unsqueeze(0).expand(phase.shape[0], -1)
+    horizontal = _bezier_deg(phase, horizontal_control, 4)
+    horizontal_dot = _bezier_deriv_deg(
+      phase,
+      duration,
+      horizontal_control,
+      4,
+    )
+    xy_delta = target_pos_l[:, :2] - start_pos_l[:, :2]
+    xy_ref = start_pos_l[:, :2] + horizontal.unsqueeze(1) * xy_delta
+    xy_ref_dot = horizontal_dot.unsqueeze(1) * xy_delta
 
-  @staticmethod
-  def _command_to_hlip_frame(
-    command_b: torch.Tensor,
-    root_quat_w: torch.Tensor,
-    stance_foot_frame_w: torch.Tensor,
-  ) -> torch.Tensor:
-    del root_quat_w, stance_foot_frame_w
-    return command_b
+    z_init = start_pos_l[:, 2]
+    z_land = target_pos_l[:, 2]
+    z_max = torch.maximum(z_init, z_land) + self.cfg.swing_clearance
+    z_control = torch.stack(
+      (
+        z_init,
+        z_init + 0.2 * (z_max - z_init),
+        z_init + 0.6 * (z_max - z_init),
+        z_max,
+        z_land + 0.5 * (z_max - z_land),
+        z_land + 0.05 * (z_max - z_land),
+        z_land,
+      ),
+      dim=1,
+    )
+    z_ref = _bezier_deg(phase, z_control, 6)
+    z_ref_dot = _bezier_deriv_deg(phase, duration, z_control, 6)
+    return (
+      torch.cat((xy_ref, z_ref.unsqueeze(1)), dim=1),
+      torch.cat((xy_ref_dot, z_ref_dot.unsqueeze(1)), dim=1),
+    )
 
+  def _sample_reference_trajectories(
+    self,
+    env_idx: int,
+  ) -> tuple[torch.Tensor, torch.Tensor]:
+    '''
+    采样 Bezier 曲线生成摆动脚参考轨迹。
+    '''
+    swing_duration = 0.5 * self.cfg.reference_period
+    phase = torch.linspace(
+      0.0,
+      1.0,
+      self.debug_vis_num_samples,
+      device=self.device,
+      dtype=self.hlip_x_init.dtype,
+    )
+    sample_time = phase * swing_duration
+    duration = torch.full_like(phase, swing_duration)
+
+    x_state = self.hlip_x_init[env_idx].unsqueeze(0).expand(phase.shape[0], -1)
+    stance_idx = int(self.stance_idx[env_idx].item())
+    y_state = self.hlip_y_init[env_idx, stance_idx].unsqueeze(0).expand(
+      phase.shape[0],
+      -1,
+    )
+    com_x, _ = self.hlip.compute_com_trajectory(sample_time, x_state)
+    com_y, _ = self.hlip.compute_com_trajectory(sample_time, y_state)
+    com_z = torch.full_like(com_x, self.cfg.hlip_com_height)
+    com_pos_l = torch.stack((com_x, com_y, com_z), dim=1)
+
+    delta_yaw = self.last_hlip_command[env_idx, 2] * sample_time
+    cos_yaw = torch.cos(delta_yaw)
+    sin_yaw = torch.sin(delta_yaw)
+    com_xy = com_pos_l[:, :2].clone()
+    com_pos_l[:, 0] = cos_yaw * com_xy[:, 0] - sin_yaw * com_xy[:, 1]
+    com_pos_l[:, 1] = sin_yaw * com_xy[:, 0] + cos_yaw * com_xy[:, 1]
+    com_frame_w = self._yaw_only_frame_w(
+      self.stance_foot_frame_w_0[env_idx].unsqueeze(0)
+    )[0]
+    com_trajectory_w = self.stance_foot_pos_0[env_idx] + self._hlip_frame_to_world(
+      com_frame_w.unsqueeze(0).expand(phase.shape[0], -1, -1),
+      com_pos_l,
+    )
+
+    swing_idx = int(self.swing_idx[env_idx].item())
+    swing_start_l = self.swing_start_foot_pos_l[env_idx, swing_idx].unsqueeze(0).expand(
+      phase.shape[0],
+      -1,
+    )
+    swing_target_l = swing_start_l.clone()
+    swing_target_l[:, :2] = self.step_target_delta_xy[env_idx, swing_idx]
+    swing_trajectory_l, _ = self._swing_foot_reference_trajectory(
+      phase,
+      duration,
+      swing_start_l,
+      swing_target_l,
+    )
+    stance_frame_w = self.stance_foot_frame_w_0[env_idx]
+    swing_trajectory_w = self.stance_foot_pos_0[env_idx] + self._hlip_frame_to_world(
+      stance_frame_w.unsqueeze(0).expand(phase.shape[0], -1, -1),
+      swing_trajectory_l,
+    )
+    return com_trajectory_w, swing_trajectory_w
+
+  def _debug_vis_impl(self, visualizer) -> None:
+    '''
+    可视化 Bezier 曲线生成摆动脚参考轨迹。
+    '''
+    for env_idx in visualizer.get_env_indices(self.num_envs):
+      com_trajectory_w, swing_trajectory_w = self._sample_reference_trajectories(
+        env_idx
+      )
+      for trajectory, color, label in (
+        (com_trajectory_w, self.debug_vis_com_color, "HLIP COM reference"),
+        (swing_trajectory_w, self.debug_vis_swing_color, "Swing foot reference"),
+      ):
+        trajectory = trajectory.detach().cpu()
+        for sample_idx in range(trajectory.shape[0] - 1):
+          visualizer.add_cylinder(
+            trajectory[sample_idx],
+            trajectory[sample_idx + 1],
+            radius=self.debug_vis_line_radius,
+            color=color,
+            label=label if sample_idx == 0 else None,
+          )
 
   @staticmethod
   def _yaw_only_frame_w(frame_w: torch.Tensor) -> torch.Tensor:
@@ -965,7 +1085,10 @@ class HLIPReferenceCommand(CommandTerm):
       swing_foot_frame_w,
       swing_foot_ang_vel_w,
     )
-    swing_foot_rpy_rate = swing_foot_omega_b
+    swing_foot_rpy_rate = _body_omega_to_rpy_rates(
+      swing_foot_rpy,
+      swing_foot_omega_b,
+    )
     reset_like = self._env.episode_length_buf.to(self.device) <= 1
     same_swing = self.last_swing_idx_for_rpy_fd == swing_indices
     fd_valid = self.last_swing_foot_rpy_valid & same_swing & ~reset_like
@@ -1105,11 +1228,7 @@ class HLIPReferenceCommand(CommandTerm):
   def _update_reference(self) -> None:
     command = self._env.command_manager.get_command(self.cfg.velocity_command_name)
     self.last_command = command.clone()
-    hlip_command = self._command_to_hlip_frame(
-      command,
-      self.robot.data.root_link_quat_w,
-      self.stance_foot_frame_w_0,
-    )
+    hlip_command = command
     self.last_hlip_command = hlip_command.clone()
     foot_pos_b = self._current_foot_pos_b()
     foot_pos_l = self._current_foot_pos_l()
@@ -1193,10 +1312,6 @@ class HLIPReferenceCommand(CommandTerm):
       ),
       dim=1,
     )
-    target_delta_xy = self._apply_step_velocity_feedback(
-      target_delta_xy,
-      swing_mask,
-    )
     target_delta_xy_raw = target_delta_xy.clone()
     target_delta_xy[:, 0] = torch.clamp(
       target_delta_xy[:, 0],
@@ -1216,68 +1331,15 @@ class HLIPReferenceCommand(CommandTerm):
       self.step_target_delta_xy,
     )
 
-    horizontal_control = torch.tensor(
-      (0.0, 0.0, 1.0, 1.0, 1.0),
-      device=self.device,
-      dtype=foot_pos_l.dtype,
-    ).unsqueeze(0).expand(self.num_envs, -1)
-    horizontal = torch.zeros_like(swing_phase)
-    horizontal_dot = torch.zeros_like(swing_phase)
-    for foot_idx in range(len(self.foot_body_names)):
-      horizontal[:, foot_idx] = _bezier_deg(
-        swing_phase[:, foot_idx],
-        horizontal_control,
-        4,
-      )
-      horizontal_dot[:, foot_idx] = _bezier_deriv_deg(
-        swing_phase[:, foot_idx],
-        swing_duration,
-        horizontal_control,
-        4,
-      )
-
-    x_ref_l = (
-      self.swing_start_foot_pos_l[:, :, 0]
-      + horizontal * (target_pos_l[:, :, 0] - self.swing_start_foot_pos_l[:, :, 0])
+    flat_swing_duration = swing_duration.unsqueeze(1).expand_as(swing_phase).reshape(-1)
+    ref_pos_l, ref_vel_l = self._swing_foot_reference_trajectory(
+      swing_phase.reshape(-1),
+      flat_swing_duration,
+      self.swing_start_foot_pos_l.reshape(-1, 3),
+      target_pos_l.reshape(-1, 3),
     )
-    y_ref_l = (
-      self.swing_start_foot_pos_l[:, :, 1]
-      + horizontal * (target_pos_l[:, :, 1] - self.swing_start_foot_pos_l[:, :, 1])
-    )
-    x_ref_l_dot = horizontal_dot * (
-      target_pos_l[:, :, 0] - self.swing_start_foot_pos_l[:, :, 0]
-    )
-    y_ref_l_dot = horizontal_dot * (
-      target_pos_l[:, :, 1] - self.swing_start_foot_pos_l[:, :, 1]
-    )
-    z_init = self.swing_start_foot_pos_l[:, :, 2]
-    z_land = target_pos_l[:, :, 2]
-    z_max = torch.maximum(z_init, z_land) + self.cfg.swing_clearance
-    z_ref = torch.zeros_like(z_init)
-    z_ref_dot = torch.zeros_like(z_init)
-    for foot_idx in range(len(self.foot_body_names)):
-      control = torch.stack(
-        (
-          z_init[:, foot_idx],
-          z_init[:, foot_idx] + 0.2 * (z_max[:, foot_idx] - z_init[:, foot_idx]),
-          z_init[:, foot_idx] + 0.6 * (z_max[:, foot_idx] - z_init[:, foot_idx]),
-          z_max[:, foot_idx],
-          z_land[:, foot_idx] + 0.5 * (z_max[:, foot_idx] - z_land[:, foot_idx]),
-          z_land[:, foot_idx] + 0.05 * (z_max[:, foot_idx] - z_land[:, foot_idx]),
-          z_land[:, foot_idx],
-        ),
-        dim=1,
-      )
-      z_ref[:, foot_idx] = _bezier_deg(swing_phase[:, foot_idx], control, 6)
-      z_ref_dot[:, foot_idx] = _bezier_deriv_deg(
-        swing_phase[:, foot_idx],
-        swing_duration,
-        control,
-        6,
-      )
-
-    ref_pos_l = torch.stack((x_ref_l, y_ref_l, z_ref), dim=-1)
-    ref_vel_l = torch.stack((x_ref_l_dot, y_ref_l_dot, z_ref_dot), dim=-1)
+    ref_pos_l = ref_pos_l.reshape(self.num_envs, len(self.foot_body_names), 3)
+    ref_vel_l = ref_vel_l.reshape(self.num_envs, len(self.foot_body_names), 3)
     stance_frame_w = self.stance_foot_frame_w_0.unsqueeze(1).expand(
       self.num_envs, len(self.foot_body_names), 3, 3
     )

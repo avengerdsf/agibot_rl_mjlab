@@ -62,6 +62,9 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
   if cfg.enable_nan_guard:
     cfg.env.sim.nan_guard.enabled = True
 
+  if cfg.video and "hlip_ref" in cfg.env.commands:
+    cfg.env.commands["hlip_ref"].debug_vis = True
+
   env = ManagerBasedRlEnv(
     cfg=cfg.env, device=device, render_mode="rgb_array" if cfg.video else None
   )

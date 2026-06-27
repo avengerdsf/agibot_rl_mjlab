@@ -69,6 +69,9 @@ def run_play(task_id: str, cfg: PlayConfig):
   if cfg.video_width is not None:
     env_cfg.viewer.width = cfg.video_width
 
+  if cfg.video and "hlip_ref" in env_cfg.commands:
+    env_cfg.commands["hlip_ref"].debug_vis = True
+
   dummy_mode = cfg.agent in {"zero", "random"}
   render_mode = "rgb_array" if (cfg.video and not dummy_mode) else None
   env = ManagerBasedRlEnv(cfg=env_cfg, device=device, render_mode=render_mode)
