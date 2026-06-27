@@ -122,6 +122,10 @@ def _masked_mean(value: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
   return torch.sum(value * mask_f) / torch.clamp(mask_f.sum(), min=1.0)
 
 
+def _masked_abs_mean(value: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+  return _masked_mean(torch.abs(value), mask)
+
+
 def _wrap_to_pi(value: torch.Tensor) -> torch.Tensor:
   return torch.remainder(value + math.pi, 2.0 * math.pi) - math.pi
 
@@ -330,3 +334,108 @@ def velocity_tracking_diagnostics(
   phase = getattr(command_term, "phase_var", getattr(command_term, "phase", None))
   _log_phase_velocity_error(log, phase, body_vx_error, body_vy_error, body_wz_error)
   return torch.linalg.norm(torch.stack((body_vx_error, body_vy_error, body_wz_error), dim=1), dim=1)
+
+
+def stance_contact_diagnostics(
+  env: "ManagerBasedRlEnv",
+  command_name: str,
+  sensor_name: str,
+  period: float,
+  offset: list[float],
+  threshold: float,
+  command_threshold: float,
+  full_contact_fraction: float = 0.99,
+  num_feet: int = 2,
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+  asset: Entity = env.scene[asset_cfg.name]
+  contact_sensor = env.scene[sensor_name]
+  command_term = env.command_manager.get_term(command_name)
+  command = command_term.last_command
+  assert contact_sensor.data.found is not None
+
+  in_contact = (contact_sensor.data.found > 0).float()
+  if in_contact.shape[1] % num_feet != 0:
+    raise RuntimeError(
+      f"stance_contact_diagnostics expected geom count divisible by num_feet={num_feet}, "
+      f"got {in_contact.shape[1]} geoms."
+    )
+
+  geoms_per_foot = in_contact.shape[1] // num_feet
+  contact_fraction = in_contact.reshape(
+    in_contact.shape[0], num_feet, geoms_per_foot
+  ).mean(dim=-1)
+  linear_norm = torch.norm(command[:, :2], dim=1)
+  angular_norm = torch.abs(command[:, 2])
+  moving = (linear_norm + angular_norm) > command_threshold
+  global_phase = ((env.episode_length_buf * env.step_dt) / period).unsqueeze(1)
+  offsets = torch.as_tensor(offset, device=env.device, dtype=global_phase.dtype).view(
+    1, -1
+  )
+  stance_mask = ((global_phase + offsets) % 1.0) < threshold
+  target_contact = torch.where(
+    moving.unsqueeze(1),
+    stance_mask,
+    torch.ones_like(stance_mask),
+  )
+  target_count = torch.clamp(target_contact.sum(dim=1), min=1)
+  stance_contact_fraction = torch.sum(
+    contact_fraction * target_contact.float(),
+    dim=1,
+  ) / target_count
+  full_contact = stance_contact_fraction >= full_contact_fraction
+  missing_contact = ~full_contact
+
+  dy_act = command_term.dy_act
+  dy_out = command_term.dy_out
+  omega_error = dy_act - dy_out
+  root_wz_abs = torch.abs(asset.data.root_link_ang_vel_b[:, 2])
+  pelvis_wz_abs = torch.abs(dy_act[:, 5])
+  swing_yaw_omega_abs = torch.abs(dy_act[:, 11])
+  swing_yaw_omega_error_abs = torch.abs(omega_error[:, 11])
+  swing_roll_omega_error_abs = torch.abs(omega_error[:, 9])
+
+  env.extras.setdefault("log", {})
+  log = env.extras["log"]
+  prefix = "Metrics/stance_contact_diag"
+  log[f"{prefix}/full_contact_fraction"] = full_contact.float().mean()
+  log[f"{prefix}/stance_contact_fraction_mean"] = torch.mean(stance_contact_fraction)
+
+  for mask_name, mask in (("full", full_contact), ("missing", missing_contact)):
+    log[f"{prefix}/{mask_name}/body_wz_abs_mean"] = _masked_mean(root_wz_abs, mask)
+    log[f"{prefix}/{mask_name}/pelvis_wz_abs_mean"] = _masked_mean(pelvis_wz_abs, mask)
+    log[f"{prefix}/{mask_name}/swing_yaw_omega_abs_mean"] = _masked_mean(
+      swing_yaw_omega_abs,
+      mask,
+    )
+    log[f"{prefix}/{mask_name}/swing_yaw_omega_error_abs_mean"] = _masked_mean(
+      swing_yaw_omega_error_abs,
+      mask,
+    )
+    log[f"{prefix}/{mask_name}/swing_roll_omega_error_abs_mean"] = _masked_mean(
+      swing_roll_omega_error_abs,
+      mask,
+    )
+
+  fd_rate = getattr(command_term, "swing_foot_rpy_rate_fd", None)
+  fd_valid = getattr(command_term, "swing_foot_rpy_rate_fd_valid", None)
+  if (
+    isinstance(fd_rate, torch.Tensor)
+    and isinstance(fd_valid, torch.Tensor)
+    and fd_rate.shape[0] == dy_act.shape[0]
+    and fd_rate.shape[1] >= 3
+    and fd_valid.shape[0] == dy_act.shape[0]
+  ):
+    valid = fd_valid.to(device=dy_act.device, dtype=torch.bool)
+    for mask_name, mask in (("full", full_contact), ("missing", missing_contact)):
+      valid_mask = mask & valid
+      log[f"{prefix}/{mask_name}/yaw_rpy_fd_abs_mean"] = _masked_abs_mean(
+        fd_rate[:, 2],
+        valid_mask,
+      )
+      log[f"{prefix}/{mask_name}/roll_rpy_fd_abs_mean"] = _masked_abs_mean(
+        fd_rate[:, 0],
+        valid_mask,
+      )
+
+  return missing_contact.float()

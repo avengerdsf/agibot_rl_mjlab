@@ -345,6 +345,20 @@ def agibot_x1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       "asset_cfg": SceneEntityCfg("robot", body_names=("x1-body",)),
     },
   )
+  cfg.metrics["stance_contact_diagnostics"] = MetricsTermCfg(
+    func=mdp.stance_contact_diagnostics,
+    params={
+      "command_name": "hlip_ref",
+      "sensor_name": feet_slip_cfg.name,
+      "period": gait_period,
+      "offset": [0.0, 0.5],
+      "threshold": contact_phase_threshold,
+      "command_threshold": 0.1,
+      "full_contact_fraction": 0.99,
+      "num_feet": 2,
+      "asset_cfg": SceneEntityCfg("robot", body_names=("x1-body",)),
+    },
+  )
 
   cfg.events["base_com"].params["asset_cfg"].body_names = ("x1-body",)
 
