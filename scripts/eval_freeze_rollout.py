@@ -102,7 +102,7 @@ def apply_freeze_to_actions(
 
 def _to_float(value) -> float:
   if isinstance(value, torch.Tensor):
-    return float(value.detach().mean().cpu())
+    return float(value.detach().float().mean().cpu())
   return float(value)
 
 

@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-CHECKPOINT_FILE="/path/to/checkpoint.pt"
+CHECKPOINT_FILE="/home/hxl228/.robot_rl_moniter/users/chen/repos/agibot_rl_mjlab/logs/rsl_rl/agibot_x1_velocity/2026-06-27_14-30-40/model_6900.pt"
 OUTPUT_DIR="logs/freeze_rollout_$(date +%Y%m%d_%H%M%S)"
-NUM_ENVS=4096
+NUM_ENVS=2048
 NUM_STEPS=2000
 TASK_ID="AgiBot-X1-Flat"
-CONDA_ENV="unitree_rl_mjlab"
+CONDA_ENV="agibot"
 FREEZE_MODE="zero"
 
 if [[ ! -f "${CHECKPOINT_FILE}" ]]; then
