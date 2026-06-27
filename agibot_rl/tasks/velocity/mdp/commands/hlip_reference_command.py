@@ -438,6 +438,7 @@ class HLIPReferenceCommand(CommandTerm):
     foot_pos_w = self._current_foot_pos_w()
     foot_frame_w = self._current_foot_hlip_frame_w()
     self.foot_rpy = self._frame_to_rpy(foot_frame_w)
+    self.swing_start_foot_yaw = self.foot_rpy[:, :, 2].clone()
     self.foot_rpy_rate = torch.zeros_like(self.foot_rpy)
     self.stance_foot_pos_0 = foot_pos_w[:, 0, :].clone()
     self.stance_foot_frame_w_0 = foot_frame_w[:, 0, :, :].clone()
@@ -523,6 +524,7 @@ class HLIPReferenceCommand(CommandTerm):
     foot_rpy = self._current_foot_rpy()
     pelvis_rpy = self._current_pelvis_rpy()
     self.foot_rpy[env_ids] = foot_rpy[env_ids]
+    self.swing_start_foot_yaw[env_ids] = foot_rpy[env_ids, :, 2]
     self.foot_rpy_rate[env_ids] = 0.0
     self.swing_foot_rpy_rate_fd[env_ids] = 0.0
     self.swing_foot_rpy_rate_fd_valid[env_ids] = False
@@ -1182,6 +1184,11 @@ class HLIPReferenceCommand(CommandTerm):
       foot_pos_l,
       self.swing_start_foot_pos_l,
     )
+    self.swing_start_foot_yaw = torch.where(
+      swing_start,
+      self.foot_rpy[:, :, 2],
+      self.swing_start_foot_yaw,
+    )
 
     swing_phase = torch.stack((self.phase_var, self.phase_var), dim=1)
     swing_duration = torch.full_like(self.phase_var, 0.5 * self.cfg.reference_period)
@@ -1333,9 +1340,39 @@ class HLIPReferenceCommand(CommandTerm):
       self.stance_foot_ori_0[:, 2],
     )
     ref_swing_foot_rpy = torch.zeros_like(pelvis_rpy_ref)
-    ref_swing_foot_rpy[:, 2] = pelvis_rpy_ref[:, 2]
     ref_swing_foot_rpy_rate = torch.zeros_like(ref_swing_foot_rpy)
-    ref_swing_foot_rpy_rate[:, 2] = pelvis_rpy_rate_ref[:, 2]
+    swing_start_yaw = self.swing_start_foot_yaw[
+      torch.arange(self.num_envs, device=self.device),
+      swing_indices,
+    ]
+    yaw_delta = wrap_to_pi(pelvis_rpy_ref[:, 2] - swing_start_yaw)
+    yaw_control = torch.tensor(
+      (0.0, 0.0, 0.0, 1.0, 1.0, 1.0),
+      device=self.device,
+      dtype=pelvis_rpy_ref.dtype,
+    ).unsqueeze(0).expand(self.num_envs, -1)
+    yaw_blend = _bezier_deg(self.phase_var, yaw_control, 5)
+    yaw_blend_dot = _bezier_deriv_deg(
+      self.phase_var,
+      swing_duration,
+      yaw_control,
+      5,
+    )
+    smoothed_swing_yaw = wrap_to_pi(swing_start_yaw + yaw_blend * yaw_delta)
+    smoothed_swing_yaw_rate = (
+      yaw_blend * pelvis_rpy_rate_ref[:, 2] + yaw_blend_dot * yaw_delta
+    )
+    active_swing = swing_mask.any(dim=1)
+    ref_swing_foot_rpy[:, 2] = torch.where(
+      active_swing,
+      smoothed_swing_yaw,
+      pelvis_rpy_ref[:, 2],
+    )
+    ref_swing_foot_rpy_rate[:, 2] = torch.where(
+      active_swing,
+      smoothed_swing_yaw_rate,
+      pelvis_rpy_rate_ref[:, 2],
+    )
     ref_upper_body_joint_pos, ref_upper_body_joint_vel = self._upper_body_reference(command)
     self._update_clf_state(
       hlip_command,
