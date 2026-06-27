@@ -21,13 +21,13 @@ HLIP_CLF_Q_WEIGHTS = (
   400.0, 10.0,
   420.0, 20.0,
   200.0, 10.0,
-  300.0, 80.0,
+  300.0, 20.0,
   1000.0, 80.0,
   1200.0, 80.0,
   2500.0, 80.0,
-  40.0, 10.0,
+  20.0, 2.0,
   10.0, 1.0,
-  420.0, 100.0,
+  200.0, 10.0,
   500.0, 10.0,
   40.0, 1.0,
   40.0, 1.0,
@@ -838,11 +838,6 @@ class HLIPReferenceCommand(CommandTerm):
       )
     geoms_per_foot = contact.shape[1] // num_feet
     return contact.reshape(contact.shape[0], num_feet, geoms_per_foot).any(dim=-1)
-
-  def get_not_flight_envs(self) -> torch.Tensor:
-    contact = self._current_foot_contact()
-    env_ids = torch.arange(self.num_envs, device=self.device)
-    return contact[env_ids, self.stance_idx].float()
 
   def _current_foot_pos_b(self) -> torch.Tensor:
     foot_pos_w = self._current_foot_pos_w()
