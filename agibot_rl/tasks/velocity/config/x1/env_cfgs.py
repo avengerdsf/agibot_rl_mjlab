@@ -359,6 +359,14 @@ def agibot_x1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       "asset_cfg": SceneEntityCfg("robot", body_names=("x1-body",)),
     },
   )
+  cfg.metrics["ankle_roll_action_diagnostics"] = MetricsTermCfg(
+    func=mdp.ankle_roll_action_diagnostics,
+    params={
+      "command_name": "hlip_ref",
+      "action_name": "joint_pos",
+      "asset_cfg": SceneEntityCfg("robot"),
+    },
+  )
 
   cfg.events["base_com"].params["asset_cfg"].body_names = ("x1-body",)
 

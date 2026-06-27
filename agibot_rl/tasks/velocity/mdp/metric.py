@@ -134,6 +134,17 @@ def _rms(value: torch.Tensor) -> torch.Tensor:
   return torch.sqrt(torch.mean(torch.square(value)))
 
 
+def _abs_corr(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+  x = torch.abs(x.float())
+  y = torch.abs(y.float())
+  x = x - torch.mean(x)
+  y = y - torch.mean(y)
+  denom = torch.sqrt(torch.sum(torch.square(x)) * torch.sum(torch.square(y)))
+  if torch.isclose(denom, torch.zeros((), device=denom.device, dtype=denom.dtype)):
+    return torch.zeros((), device=denom.device, dtype=x.dtype)
+  return torch.sum(x * y) / denom
+
+
 def _log_velocity_axis(
   log: dict[str, torch.Tensor],
   prefix: str,
@@ -439,3 +450,72 @@ def stance_contact_diagnostics(
       )
 
   return missing_contact.float()
+
+
+def ankle_roll_action_diagnostics(
+  env: "ManagerBasedRlEnv",
+  command_name: str,
+  action_name: str = "joint_pos",
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+  asset: Entity = env.scene[asset_cfg.name]
+  command_term = env.command_manager.get_term(command_name)
+  action_term = env.action_manager.get_term(action_name)
+
+  left_joint_ids, _ = asset.find_joints([r"left_ankle_roll_.*"])
+  right_joint_ids, _ = asset.find_joints([r"right_ankle_roll_.*"])
+  left_action_ids = _action_indices(action_term.target_names, [r"left_ankle_roll_.*"])
+  right_action_ids = _action_indices(action_term.target_names, [r"right_ankle_roll_.*"])
+  if len(left_joint_ids) != 1 or len(right_joint_ids) != 1:
+    raise RuntimeError("ankle_roll_action_diagnostics requires one left and one right ankle roll joint.")
+  if len(left_action_ids) != 1 or len(right_action_ids) != 1:
+    raise RuntimeError("ankle_roll_action_diagnostics requires one left and one right ankle roll action.")
+
+  left_action = action_term.raw_action[:, left_action_ids[0]]
+  right_action = action_term.raw_action[:, right_action_ids[0]]
+  action_pair = torch.stack((left_action, right_action), dim=1)
+  prev_action_pair = getattr(command_term, "_ankle_roll_diag_prev_action_pair", None)
+  if not isinstance(prev_action_pair, torch.Tensor) or prev_action_pair.shape != action_pair.shape:
+    action_delta_pair = torch.zeros_like(action_pair)
+  else:
+    action_delta_pair = action_pair - prev_action_pair.to(device=action_pair.device)
+  command_term._ankle_roll_diag_prev_action_pair = action_pair.detach().clone()
+
+  left_joint_vel = asset.data.joint_vel[:, left_joint_ids[0]]
+  right_joint_vel = asset.data.joint_vel[:, right_joint_ids[0]]
+  joint_vel_pair = torch.stack((left_joint_vel, right_joint_vel), dim=1)
+  swing_side = command_term.swing_idx.to(device=action_pair.device, dtype=torch.long)
+  stance_side = 1 - swing_side
+  env_ids = torch.arange(action_pair.shape[0], device=action_pair.device)
+
+  swing_action = action_pair[env_ids, swing_side]
+  stance_action = action_pair[env_ids, stance_side]
+  swing_action_delta = action_delta_pair[env_ids, swing_side]
+  stance_action_delta = action_delta_pair[env_ids, stance_side]
+  swing_joint_vel = joint_vel_pair[env_ids, swing_side]
+  stance_joint_vel = joint_vel_pair[env_ids, stance_side]
+
+  env.extras.setdefault("log", {})
+  log = env.extras["log"]
+  prefix = "Metrics/ankle_roll_diag"
+  log[f"{prefix}/swing_action_abs_mean"] = torch.mean(torch.abs(swing_action))
+  log[f"{prefix}/stance_action_abs_mean"] = torch.mean(torch.abs(stance_action))
+  log[f"{prefix}/swing_action_delta_abs_mean"] = torch.mean(torch.abs(swing_action_delta))
+  log[f"{prefix}/stance_action_delta_abs_mean"] = torch.mean(torch.abs(stance_action_delta))
+  log[f"{prefix}/swing_joint_vel_abs_mean"] = torch.mean(torch.abs(swing_joint_vel))
+  log[f"{prefix}/stance_joint_vel_abs_mean"] = torch.mean(torch.abs(stance_joint_vel))
+
+  dy_out = command_term.dy_out
+  dy_act = command_term.dy_act
+  if dy_out.shape == dy_act.shape and dy_out.dim() == 2 and dy_out.shape[1] >= 12:
+    omega_error = dy_act - dy_out
+    log[f"{prefix}/swing_action_delta_yaw_omega_abs_corr"] = _abs_corr(
+      swing_action_delta,
+      dy_act[:, 11],
+    )
+    log[f"{prefix}/swing_action_delta_roll_omega_error_abs_corr"] = _abs_corr(
+      swing_action_delta,
+      omega_error[:, 9],
+    )
+
+  return torch.abs(swing_action_delta)
