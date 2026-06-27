@@ -47,12 +47,7 @@ class EvalFreezeConfig:
   num_steps: int = 2000
   warmup_steps: int = 100
   device: str | None = None
-  freeze: tuple[FreezeKind, ...] = (
-    "none",
-    "swing_hip_yaw",
-    "swing_hip_roll",
-    "swing_ankle_roll",
-  )
+  freeze: FreezeKind = "none"
   freeze_mode: FreezeMode = "zero"
   output_file: str | None = None
   no_terminations: bool = False
@@ -190,10 +185,7 @@ def run_one(task_id: str, cfg: EvalFreezeConfig, freeze: FreezeKind) -> dict[str
 
 
 def run_eval(task_id: str, cfg: EvalFreezeConfig) -> dict[str, dict[str, float]]:
-  results = {}
-  for freeze in cfg.freeze:
-    print(f"[eval] running freeze={freeze}")
-    results[freeze] = run_one(task_id, cfg, freeze)
+  results = {cfg.freeze: run_one(task_id, cfg, cfg.freeze)}
   _print_summary(results)
   if cfg.output_file is not None:
     output_path = Path(cfg.output_file)
