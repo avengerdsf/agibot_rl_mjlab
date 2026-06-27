@@ -839,6 +839,23 @@ class HLIPReferenceCommand(CommandTerm):
     geoms_per_foot = contact.shape[1] // num_feet
     return contact.reshape(contact.shape[0], num_feet, geoms_per_foot).any(dim=-1)
 
+  def get_not_flight_envs(
+    self,
+    contact_force_thresh: float = 1.0,
+  ) -> torch.Tensor:
+    sensor = self._env.scene[self.cfg.contact_sensor_name]
+    assert sensor.data.force is not None
+    force_w = sensor.data.force
+    num_feet = len(self.foot_body_names)
+    if force_w.shape[1] != num_feet:
+      raise RuntimeError(
+        f"HLIP stance contact expected {num_feet} foot forces, "
+        f"got {force_w.shape[1]}."
+      )
+    env_ids = torch.arange(force_w.shape[0], device=force_w.device)
+    stance_force_z = force_w[env_ids, self.stance_idx, 2]
+    return (stance_force_z > contact_force_thresh).float()
+
   def _current_foot_pos_b(self) -> torch.Tensor:
     foot_pos_w = self._current_foot_pos_w()
     root_pos_w = self.robot.data.root_link_pos_w.unsqueeze(1)
