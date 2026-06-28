@@ -458,9 +458,7 @@ def agibot_x1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     },
   )
 
-  cfg.rewards["body_orientation_l2"].params["asset_cfg"] = SceneEntityCfg(
-    "robot", body_names=("x1-body",)
-  )
+  cfg.rewards["body_orientation_l2"] = None
   cfg.rewards["body_ang_vel"].params["asset_cfg"] = SceneEntityCfg(
     "robot", body_names=("x1-body",)
   )
