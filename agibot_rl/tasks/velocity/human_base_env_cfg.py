@@ -38,13 +38,35 @@ import agibot_rl.tasks.velocity.mdp as mdp
 
 POLICY_JOINTS_NAMES=(
   "lumbar_yaw_.*",
-  # "lumbar_pitch_.*",
-  # "lumbar_roll_.*",
   "left_shoulder_pitch_.*",
   "right_shoulder_pitch_.*",
   "left_shoulder_roll_.*",
   "right_shoulder_roll_.*",
   ".*_elbow_pitch_.*",
+  "left_hip_pitch_.*",
+  "right_hip_pitch_.*",
+  "left_hip_roll_.*",
+  "right_hip_roll_.*",
+  "left_hip_yaw_.*",
+  "right_hip_yaw_.*",
+  ".*_knee_pitch_.*",
+  ".*_ankle_pitch_.*",
+  ".*_ankle_roll_.*"
+)
+
+OBSERVED_JOINTS_NAMES=(
+  "lumbar_yaw_.*",
+  "lumbar_pitch_.*",
+  "lumbar_roll_.*",
+  "left_shoulder_pitch_.*",
+  "right_shoulder_pitch_.*",
+  "left_shoulder_roll_.*",
+  "right_shoulder_roll_.*",
+  ".*_shoulder_yaw_.*",
+  ".*_elbow_pitch_.*",
+  ".*_elbow_yaw_.*",
+  ".*_wrist_pitch_.*",
+  ".*_wrist_roll_.*",
   "left_hip_pitch_.*",
   "right_hip_pitch_.*",
   "left_hip_roll_.*",
@@ -101,12 +123,12 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
     "joint_pos": ObservationTermCfg(
       func=mdp.joint_pos_rel,
       noise=Unoise(n_min=-0.01, n_max=0.01),
-      params={"asset_cfg": SceneEntityCfg("robot",joint_names=POLICY_JOINTS_NAMES)}
+      params={"asset_cfg": SceneEntityCfg("robot",joint_names=OBSERVED_JOINTS_NAMES)}
     ),
     "joint_vel": ObservationTermCfg(
       func=mdp.joint_vel_rel,
       noise=Unoise(n_min=-1.5, n_max=1.5),
-      params={"asset_cfg": SceneEntityCfg("robot",joint_names=POLICY_JOINTS_NAMES)}
+      params={"asset_cfg": SceneEntityCfg("robot",joint_names=OBSERVED_JOINTS_NAMES)}
 
     ),
     "actions": ObservationTermCfg(func=mdp.last_action),
