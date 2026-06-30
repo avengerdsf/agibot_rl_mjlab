@@ -7,11 +7,20 @@ import torch
 from mjlab.entity import Entity
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.sensor import ContactSensor
+from mjlab.utils.lab_api.math import euler_xyz_from_quat
 
 if TYPE_CHECKING:
   from mjlab.envs import ManagerBasedRlEnv
 
 _DEFAULT_ASSET_CFG = SceneEntityCfg("robot")
+
+
+def base_euler_xyz(
+  env: ManagerBasedRlEnv, asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG
+) -> torch.Tensor:
+  asset: Entity = env.scene[asset_cfg.name]
+  roll, pitch, yaw = euler_xyz_from_quat(asset.data.root_link_quat_w)
+  return torch.stack((roll, pitch, yaw), dim=-1)
 
 
 def foot_height(

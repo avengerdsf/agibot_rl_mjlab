@@ -112,8 +112,8 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
       params={"sensor_name": "robot/body-angular-velocity"},
       noise=Unoise(n_min=-0.2, n_max=0.2),
     ),
-    "projected_gravity": ObservationTermCfg(
-      func=mdp.projected_gravity,
+    "base_euler_xyz": ObservationTermCfg(
+      func=mdp.base_euler_xyz,
       noise=Unoise(n_min=-0.05, n_max=0.05),
     ),
     "command": ObservationTermCfg(
